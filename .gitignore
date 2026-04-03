@@ -1,0 +1,17 @@
+.idea
+__pycache__/
+*.pyc
+*.json
+*.csv
+
+.vscode/
+bak/
+docs/
+eval_records/
+models/
+replays/
+results/
+runner_bk/
+src_bk/
+scenarios/
+static/

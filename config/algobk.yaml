@@ -1,0 +1,50 @@
+algorithm: qmix  # 默认算法
+
+# 公共参数
+common:
+  seed: 42
+  device: cpu
+
+# QMIX 专属参数字典
+qmix:
+  # --- 1. 基础训练与环境超参数 ---
+  group_size: 10             # 每组雷达数量
+  max_episode_steps: 600     # 单个回合的最大步数
+  learning_rate: 0.0003      # QMIX 整体学习率 (使用 RMSprop)
+  gamma: 0.99                # 折扣因子
+  batch_size: 32             # 每次训练采样的 Episode 数量
+  buffer_size: 500          # 经验池最大容量 (Episode 数)
+  update_target_params: 200  # 目标网络硬更新频率 (Step数)
+  grad_norm_clip: 10.0       # 梯度裁剪阈值
+  
+  # --- 2. 探索率 (Epsilon) 退火参数 ---
+  epsilon_start: 1.0         # 初始随机探索概率
+  epsilon_finish: 0.05       # 最终随机探索概率,防止局部最优解
+  epsilon_anneal_time: 600000 # 探索率退火总步数
+
+  # --- 3. 网络结构与底层逻辑 (前端不传时，由这里兜底) ---
+  optimizer: "RMS"           # 优化器类型
+  drqn_hidden_dim: 128        # 单体网络 GRU 隐藏层维度
+  qmix_hidden_dim: 32        # QMIX 混频网络隐藏层维度
+  hyper_hidden_dim: 128       # 生成混频权重的超网络维度
+  two_hyper_layers: false    # 是否使用双层超网络
+  last_action: true          # DRQN 输入是否包含上一步动作
+  reuse_network: true        # 所有 agent 是否共享网络
+
+# 训练全局控制
+train:
+  max_episodes: 2000         
+  save_frequency: 100        # 模型保存间隔
+  result_dir: ./results
+  model_dir: ./models
+
+eval:
+  # 1. 基础控制
+  max_episodes: 1            
+  model_dir: "./models"     
+  
+  # 2. 算法推理控制
+  epsilon: 0.0                # 评估时必须强制设为0
+  
+  # 3. 数据与回放保存
+  eval_records_dir: "./eval_records" # 评估记录

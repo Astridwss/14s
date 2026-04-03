@@ -1,0 +1,72 @@
+algorithm: qmix  # 默认算法（后端 API 会根据请求动态覆盖这个值）
+
+# ==========================================
+# 公共参数 (Common)
+common:
+  seed: 42
+  device: cpu
+
+# ==========================================
+qmix:
+  # 1. 强化学习控制参数
+  max_episode_steps: 600             
+  learning_rate: 0.0005      # 针对 200 智能体稍微放大
+  gamma: 0.99                
+  batch_size: 32             
+  buffer_size: 2000          
+  update_target_params: 200  
+  grad_norm_clip: 10.0       
+  
+  # 2. 探索率控制
+  epsilon_start: 1.0         
+  epsilon_finish: 0.05       
+  epsilon_anneal_time: 100000
+  optimizer: "RMS"           
+  
+  # 3. 网络结构参数 
+  drqn_hidden_dim: 128        
+  qmix_hidden_dim: 32        
+  hyper_hidden_dim: 128       
+  two_hyper_layers: false    
+  last_action: true          
+  reuse_network: true        
+
+# ==========================================
+# 算法 2: 模仿学习参数
+drqn_il:
+  batch_size: 32             
+  learning_rate: 0.001       # 监督学习的学习率通常比 RL 略大
+  seq_len: 50                # RNN 时序截断长度
+  train_val_split: 1.0       
+  grad_norm_clip: 10.0       
+  optimizer: "Adam"          
+  
+  # 2. 网络结构参数,必须与 QMIX 绝对一致，否则无法作为预训练权重
+  drqn_hidden_dim: 128
+  qmix_hidden_dim: 32        
+  hyper_hidden_dim: 128      
+  two_hyper_layers: false    
+  last_action: true
+  reuse_network: true
+
+  #3. 样本增强参数
+  aug_factor: 5     #增强倍数
+  use_data_augmentation: True     # 是否开启数据增强
+
+# ==========================================
+# 训练全局控制 (Train 模式公共配置)
+train:
+  max_episodes: 5000             # RL 默认训练回合数
+  load_dir: "./load_dir"         
+  epochs: 50                     # IL 默认训练轮数
+  save_frequency: 10             # 保存频率
+  result_dir: ./results
+  model_dir: ./models
+  flag_dir: ./flags
+
+# ==========================================
+eval:
+  max_episodes: 1             
+  load_dir: "./load_dir"                
+  epsilon: 0.0                
+  eval_records_dir: "./eval_records"
