@@ -39,24 +39,32 @@ class TwoDimDisplay:
         self.fixed_radars = [] # 缓存第一帧的雷达位置
 
     def _lock_viewport_and_radars(self, radars):
-        """ 修复：在第一帧打地桩，锁死雷达位置和全地图视野"""
-        all_lons = [r['lon'] for r in radars]
-        all_lats = [r['lat'] for r in radars]
+        """ 修复：在第一帧打地桩，过滤异常坐标 (如 0,0)，并自适应视口比例"""
+        # 1. 过滤掉绝对值小于 0.1 的异常坐标（避免 0,0 扯烂画布）
+        all_lons = [r['lon'] for r in radars if abs(r['lon']) > 0.1]
+        all_lats = [r['lat'] for r in radars if abs(r['lat']) > 0.1]
         
         # 把轨迹的极值也加进来
         for track in self.fixed_trajectories.values():
             for pt in track:
-                all_lons.append(pt[0])
-                all_lats.append(pt[1])
+                if abs(pt[0]) > 0.1 and abs(pt[1]) > 0.1:
+                    all_lons.append(pt[0])
+                    all_lats.append(pt[1])
                 
         if all_lons and all_lats:
-            margin = 1.0 # 留出 1 度的视野冗余
-            self.bbox["min_lon"] = min(all_lons) - margin
-            self.bbox["max_lon"] = max(all_lons) + margin
-            self.bbox["min_lat"] = min(all_lats) - margin
-            self.bbox["max_lat"] = max(all_lats) + margin
+            min_lon, max_lon = min(all_lons), max(all_lons)
+            min_lat, max_lat = min(all_lats), max(all_lats)
             
-        #  永远缓存第一帧的雷达位置，后续忽略环境传来的雷达经纬度微小漂移
+            # 2. 自适应边距：取真实经纬度跨度的 10% 作为留白，而不是死板的 1.0 度
+            margin_lon = max(0.01, (max_lon - min_lon) * 0.1) # 最小留 0.01 度(约 1km)
+            margin_lat = max(0.01, (max_lat - min_lat) * 0.1)
+            
+            self.bbox["min_lon"] = min_lon - margin_lon
+            self.bbox["max_lon"] = max_lon + margin_lon
+            self.bbox["min_lat"] = min_lat - margin_lat
+            self.bbox["max_lat"] = max_lat + margin_lat
+            
+        # 永远缓存第一帧的雷达位置
         self.fixed_radars = radars.copy()
         self.view_initialized = True
 
@@ -75,6 +83,15 @@ class TwoDimDisplay:
         #  第一帧初始化：打下地桩，锁死相机和雷达
         if not self.view_initialized:
             self._lock_viewport_and_radars(radars)
+
+        # 如果有目标飞出了当前屏幕边界，动态把相机框撑大
+        for t in targets:
+            if abs(t['lon']) > 0.1 and abs(t['lat']) > 0.1: # 忽略失效目标的0,0坐标
+                if t['lon'] < self.bbox["min_lon"]: self.bbox["min_lon"] = t['lon'] - 0.05
+                if t['lon'] > self.bbox["max_lon"]: self.bbox["max_lon"] = t['lon'] + 0.05
+                if t['lat'] < self.bbox["min_lat"]: self.bbox["min_lat"] = t['lat'] - 0.05
+                if t['lat'] > self.bbox["max_lat"]: self.bbox["max_lat"] = t['lat'] + 0.05
+        # ==================================
 
         self.screen.fill(self.colors["bg"])
 

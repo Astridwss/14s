@@ -70,6 +70,8 @@ class TrainRunner:
         print(f"[TrainRunner] Reward目录: {self.result_dir}")
         print(f"[TrainRunner] 模型目录: {self.model_dir}")
         print(f"[TrainRunner] 维度注入成功: n_agents={self.conf.n_agents}, obs_shape={self.conf.obs_shape}, state_shape={self.conf.state_shape}")
+        print(f"[TrainRunner] 智能体输入信息处理对象已将信息转换为向量格式")
+
 
     def save_episode_reward_plot(self, rewards_list, save_path, label="Training Rewards", xlabel="Episode"):
         """绘制并保存奖励曲线"""
@@ -213,7 +215,7 @@ class TrainRunner:
             self.env_steps += step_count
             self.episode_rewards.append(ep_reward)
 
-            # 2. 将数据存入 Buffer
+            # 2. 将数据存入 Buffer，参考回合数进行设置
             self.buffer.store_episode(ep_data)
 
             # 3. 训练并获取 loss

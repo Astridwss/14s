@@ -153,8 +153,8 @@ def generate_expert_csv(conf, dest_csv_path: str):
                         if expert_action != 0: 
                             break
                 
-                # ================== 【核心新增逻辑：用物理掩码纠正专家】 ==================
-                # 如果专家要求跟踪某个目标 (expert_action > 0)
+                # ================== 用动作掩码纠正 ==================
+                # 如果要求跟踪某个目标 (expert_action > 0)
                 if expert_action > 0:
                     # 去 avail_actions 掩码里查一下，这个目标现在到底能不能看见？
                     # avail_actions 形状是 (n_radars, n_actions)，掩码 0.0 代表不可见

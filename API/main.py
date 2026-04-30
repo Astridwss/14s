@@ -1,6 +1,7 @@
 import sys
 import json
 from pathlib import Path
+import traceback
 from pydantic import BaseModel
 import os
 import uvicorn
@@ -40,8 +41,8 @@ def run_rl_train_task(task_id: str, request: RLTrainRequest):
             print(f"[Task {task_id}] 强化学习训练任务完成")
             
     except Exception as e:
-        if request.hyperparameters.show_log:
-            print(f"[Task {task_id}] 强化学习训练崩溃: {str(e)}")
+        error_detail = traceback.format_exc()
+        print(f"[Task {task_id}] 强化学习训练崩溃: {error_detail}")
 
 
 def run_il_train_task(task_id: str, request: ILTrainRequest):
@@ -61,26 +62,29 @@ def run_il_train_task(task_id: str, request: ILTrainRequest):
         print(f"[ILTrainTask {task_id}] 模仿学习训练任务完成")
             
     except Exception as e:
-        print(f"[ILTrainTask {task_id}] 模仿学习训练崩溃: {str(e)}")
+        error_detail = traceback.format_exc()
+        print(f"[ILTrainTask {task_id}] 模仿学习训练崩溃: {error_detail}")
 
 
 def run_eval_task(task_id: str, request: EvalRequest):
     """后台守护进程，执行推演逻辑。"""
-    # try:
-    my_eval_config = prepare_task_context(task_id, request, mode="eval")
-    my_eval_config.task_id = task_id  # 推演特有的参数
-    
-    runner = EvalRunner(conf=my_eval_config)
-    #notifier = PlatformNotifier(task_id)
-
-    #runner.run(result_callback=notifier.push_eval_result)
-    file_path = runner.run()
-    
-    print(f"[EvalTask {task_id}] 推演完成")
-    return file_path
+    try:
+        my_eval_config = prepare_task_context(task_id, request, mode="eval")
+        my_eval_config.task_id = task_id  # 推演特有的参数
         
-    # except Exception as e:
-    #     print(f"[EvalTask {task_id}] 推演崩溃: {str(e)}")
+        runner = EvalRunner(conf=my_eval_config)
+        #notifier = PlatformNotifier(task_id)
+
+        #runner.run(result_callback=notifier.push_eval_result)
+        file_path = runner.run()
+        
+        print(f"[EvalTask {task_id}] 推演完成")
+        return file_path
+        
+    except Exception as e:
+        error_detail = traceback.format_exc()
+        print(f"[EvalTask {task_id}] 推演崩溃: {error_detail}")
+        raise e
 
 
 def generate_entities_from_scene(conf: Config, plan_id: int):

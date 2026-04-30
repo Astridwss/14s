@@ -32,9 +32,7 @@ class ExpertDataset(Dataset):
             print(f"[ExpertDataset] CSV 样本生成完毕: {self.csv_path}")
 
 
-
-
-            # ================= 测试 txl 转 csv，后面删除 =================
+            # ================= 打印离线数据 =================
             plan_id = 867
             scene_json_path = r"C:\webace_2026\14s\code\webace-3\test\scene.json"
             self.txl_csv_path = r"C:\webace_2026\14s\code\webace-3\txl_test.csv"
@@ -50,11 +48,7 @@ class ExpertDataset(Dataset):
             )
 
             print("[测试] txl 转 csv 成功")
-        # ================= 测试 txl 转 csv =================
-
-
-
-
+        # ================= 打印离线数据 =================
 
 
         # ===================加载 CSV 并构建张量=======================

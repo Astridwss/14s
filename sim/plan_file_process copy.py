@@ -74,29 +74,12 @@ class PlanFileProcess:
                                 satellite_info = SatelliteInfo()
                                 satellite_info.str_satellite_id = str(dict_satellite.get('id', ''))
                                 satellite_info.str_satellite_name = dict_satellite.get('satellifeName', '')
-                                satellite_info.azi_min = -2.5
-                                satellite_info.azi_max = 2.5
-                                satellite_info.ele_min = -2.5
-                                satellite_info.ele_max = 2.5
+                                satellite_info.dict_satellite_traj_pt_info
+                                satellite_info.azi_min = -10.0
+                                satellite_info.azi_max = 10.0
+                                satellite_info.ele_min = -10.0
+                                satellite_info.ele_max = 10.0
                                 satellite_info.track_num_max = 1
-
-                                # 20260408
-                                str_target_calc = dict_satellite.get('targetCalc')
-                                target_calc_data = json.loads(str_target_calc)
-
-                                if isinstance(target_calc_data, dict):
-                                    lst_vpt = target_calc_data.get('vPtList')
-
-                                    for dict_vpt in lst_vpt:
-                                        traj_pt_info = TargetTrajPtInfo()
-                                        traj_pt_info.time = round(dict_vpt.get('dTime'))
-                                        traj_pt_info.longitude = dict_vpt.get('geoPos').get('x')
-                                        traj_pt_info.latitude = dict_vpt.get('geoPos').get('y')
-                                        traj_pt_info.altitude = dict_vpt.get('geoPos').get('z')
-                                        traj_pt_info.rcs = 1.0
-                                        traj_pt_info.type = 5
-
-                                        satellite_info.dict_satellite_traj_pt_info[traj_pt_info.time] = traj_pt_info
 
                                 battle_scene.dict_satellite_id_info[satellite_info.str_satellite_id] = satellite_info
 
@@ -201,10 +184,8 @@ class PlanFileProcess:
     def write_model_inference_result_to_plan_result(self, dict_model_inference_result: Dict[int, List[AgentActionCommand]], time_cut: int = 20) -> PlanResult:
         plan_result = PlanResult()
 
-        # print(dict_model_inference_result.keys())
-
-        # dict_model_inference_result_sorted = dict(sorted(dict_model_inference_result.items()))   20260409 暂不需要再排序啦
-        for lst_model_inference_result in dict_model_inference_result.values():
+        dict_model_inference_result_sorted = dict(sorted(dict_model_inference_result.items()))
+        for lst_model_inference_result in dict_model_inference_result_sorted.values():
             for model_inference_result in lst_model_inference_result:
                 if model_inference_result.str_equip_id not in plan_result.dict_equip_id_target_id_detection_time:
                     plan_result.dict_equip_id_target_id_detection_time[model_inference_result.str_equip_id] = {}
@@ -235,8 +216,6 @@ class PlanFileProcess:
                         detection_time.time_range.value_max = model_inference_result.time
 
                         plan_result.dict_equip_id_target_id_detection_time[model_inference_result.str_equip_id][model_inference_result.str_target_id].append(detection_time)
-
-        print(plan_result.dict_equip_id_target_id_detection_time.keys())
 
         return plan_result
 

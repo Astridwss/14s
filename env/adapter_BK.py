@@ -14,7 +14,7 @@ class ScenarioAdapter:
     2. 动态提取：在仿真 step 中，将仿真引擎吐出的复杂对象 (AgentObservation) 转化为规整的 Numpy 张量。
     
     """
-    RADAR_OBS_DIM = 9      
+    RADAR_OBS_DIM = 8      
     TARGET_OBS_DIM = 5     
     RADAR_STATE_DIM = 5    # 全局状态: [分配目标索引, 负载率, x, y, z]
     TARGET_STATE_DIM = 8   # 全局状态: [ecf_x, ecf_y, ecf_z, ecf_vx, ecf_vy, ecf_vz, rcs/lock, type]
@@ -27,7 +27,7 @@ class ScenarioAdapter:
         local_scene_path = getattr(conf, 'local_scene_path', None)
         plan_id = getattr(conf, 'plan_id', 867)
 
-        # 2. 调用解耦的静态方法获取数量
+        # 2. 调用解耦的静态方法获取数量 (使用 cls. 或者 ScenarioAdapter. 调用)
         n_radars, n_satellites, n_targets, radar_keys, target_keys, satellites_keys = cls.extract_agents(local_scene_path, plan_id)
 
         # 3. 动态注入到 conf 中
@@ -39,20 +39,19 @@ class ScenarioAdapter:
         conf.n_satellites = n_satellites
         conf.n_targets = n_targets
 
-        # ================= [核心修改 1] =================
-        # 合并雷达和卫星作为全体智能体
-        conf.n_agents = n_radars + n_satellites 
+        #TODO:conf.n_agents等待传入真实的卫星数量，可能与网络维度产生报错。
+        conf.n_agents = n_radars 
         conf.n_actions = n_targets + 1  # 动作0=待机，1~N=对应目标
         
         # 4. 根据公式推导强化学习的Tensor维度
         conf.radar_obs_dim = cls.RADAR_OBS_DIM + (n_targets * cls.TARGET_OBS_DIM) 
         conf.obs_shape = conf.radar_obs_dim
-        # 全局状态计算时，原本的 n_radars 替换为全体智能体 n_agents
-        conf.state_shape = (n_targets * cls.TARGET_STATE_DIM) + (conf.n_agents * cls.RADAR_STATE_DIM) + 1
-        # ================================================
+        conf.state_shape = (n_targets * cls.TARGET_STATE_DIM) + (n_radars * cls.RADAR_STATE_DIM) + 1
         
-        print(f"[ScenarioAdapter] 维度注入成功: n_agents={conf.n_agents}, n_actions={conf.n_actions}, "
+        #TODO：智能体个数与真实不符，待接入真实WX数据
+        print(f"[ScenarioAdapter] 维度注入成功: n_agents={conf.n_agents + n_satellites}, n_actions={conf.n_actions}, "
               f"obs={conf.obs_shape}, state={conf.state_shape}")
+        print(f"[ScenarioAdapter] 智能体输入信息处理对象已将信息转换为向量格式")
 
 
     @staticmethod
@@ -99,49 +98,40 @@ class ScenarioAdapter:
         self.conf = conf
 
     def extract_action_masks(self, agent_obs: AgentObservation) -> np.ndarray:
-        # ================= [核心修改 2] =================
-        action_mask = np.zeros((self.conf.n_agents, self.conf.n_actions), dtype=np.float32)
-        action_mask[:, 0] = 1.0  # 所有智能体（雷达/卫星）默认都可以执行待机动作
+        action_mask = np.zeros((self.conf.n_radars, self.conf.n_actions), dtype=np.float32)
+        action_mask[:, 0] = 1.0  
         
-        # 使用注入好的实体ID列表合并
+        # 使用注入好的实体ID列表
         radar_keys = getattr(self.conf, 'radar_keys', [])
-        satellites_keys = getattr(self.conf, 'satellites_keys', [])
         target_keys = getattr(self.conf, 'target_keys', [])
-        
-        all_agent_keys = radar_keys + satellites_keys # 统一编号顺序
 
         for sid, target_dict in agent_obs.dict_detection_result.items():
-            if sid in all_agent_keys:
-                agent_idx = all_agent_keys.index(sid)
+            if sid in radar_keys:
+                ri = radar_keys.index(sid)
                 for tid, res in target_dict.items():
                     if res.detectable_flag and tid in target_keys:
                         ti = target_keys.index(tid)
-                        action_mask[agent_idx, ti + 1] = 1.0  
-        # ================================================
+                        action_mask[ri, ti + 1] = 1.0  
         return action_mask
 
     def extract_observations(self, agent_obs: AgentObservation) -> np.ndarray:
-        # ================= [核心修改 3] =================
-        obs = np.zeros((self.conf.n_agents, self.conf.radar_obs_dim), dtype=np.float32)
+        obs = np.zeros((self.conf.n_radars, self.conf.radar_obs_dim), dtype=np.float32)
         track_dict = agent_obs.dict_system_track
         sensor_by_id = agent_obs.dict_equip_state
         
         radar_keys = getattr(self.conf, 'radar_keys', [])
-        satellites_keys = getattr(self.conf, 'satellites_keys', [])
         target_keys = getattr(self.conf, 'target_keys', [])
-        all_agent_keys = radar_keys + satellites_keys
         
         target_lock_counts = {}  
         for s in sensor_by_id.values():
             for tid in s.lst_track_no:
                 target_lock_counts[tid] = target_lock_counts.get(tid, 0) + 1
 
-        # 1. 提取智能体自身特征（雷达和卫星共用底层属性）
-        for i in range(self.conf.n_agents):
-            real_sid = all_agent_keys[i] if i < len(all_agent_keys) else f"AGENT_{i:03d}"
+        for i in range(self.conf.n_radars):
+            #  使用真实 ID 去底层环境要数据
+            real_sid = radar_keys[i] if i < len(radar_keys) else f"RADAR_{i:03d}"
             s = sensor_by_id.get(real_sid)
             if s is not None:
-                # TODO：在这里如果未来需要引入 type 差异化，可通过 s.type 判断
                 max_cap = max(1, s.track_num_max)
                 obs[i, 0] = s.residual_track_num / max_cap
                 if s.lst_track_no:
@@ -154,21 +144,10 @@ class ScenarioAdapter:
                 obs[i, 4] = s.azi_min / 360.0                     
                 obs[i, 5] = s.azi_max / 360.0                     
                 obs[i, 6] = s.ele_min / 90.0                      
-                obs[i, 7] = s.ele_max / 90.0
+                obs[i, 7] = s.ele_max / 90.0                      
 
-                # ================= 注入智能体身份标签 =================
-                # 索引为 8，代表第 9 个特征维度是雷达还是卫星
-                if s.type == 1:
-                    obs[i, 8] = 1.0   # 是雷达
-                elif s.type == 2:
-                    obs[i, 8] = -1.0  # 是卫星
-                else:
-                    obs[i, 8] = 0.0
-                # =================================================================                      
-
-        # 2. 提取目标相对特征
-        for ri in range(self.conf.n_agents):
-            real_sid = all_agent_keys[ri] if ri < len(all_agent_keys) else f"AGENT_{ri:03d}"
+        for ri in range(self.conf.n_radars):
+            real_sid = radar_keys[ri] if ri < len(radar_keys) else f"RADAR_{ri:03d}"
             s = sensor_by_id.get(real_sid)
             if not s: continue
             
@@ -188,13 +167,11 @@ class ScenarioAdapter:
                     obs[ri, base_idx + 2] = a / 360.0              
                     obs[ri, base_idx + 3] = e / 90.0               
                 
-                # 注意：全局锁定率的分子不变，分母改为全体 n_agents
-                obs[ri, base_idx + 4] = target_lock_counts.get(real_tid, 0) / self.conf.n_agents
-        # ================================================
+                obs[ri, base_idx + 4] = target_lock_counts.get(real_tid, 0) / self.conf.n_radars
         return obs
 
     def extract_global_state(self, agent_obs: AgentObservation) -> np.ndarray:
-        # ================= [核心修改 4] =================
+        """提取上帝视角全局状态"""
         state_elements = []
         
         target_lock_counts = {}
@@ -203,20 +180,18 @@ class ScenarioAdapter:
                 target_lock_counts[tid] = target_lock_counts.get(tid, 0) + 1
 
         radar_keys = getattr(self.conf, 'radar_keys', [])
-        satellites_keys = getattr(self.conf, 'satellites_keys', [])
         target_keys = getattr(self.conf, 'target_keys', [])
-        all_agent_keys = radar_keys + satellites_keys
 
-        # 1. 目标真实状态矩阵
+        # 1. 目标真实状态矩阵 (n_targets, 8)
         target_states = np.zeros((self.conf.n_targets, self.TARGET_STATE_DIM), dtype=np.float32)
         track_dict = agent_obs.dict_system_track  
         
         for i in range(self.conf.n_targets):
+            #  使用真实目标 ID 查字典
             real_tid = target_keys[i] if i < len(target_keys) else f"TARGET_{i:03d}"
             if real_tid in track_dict:
                 t = track_dict[real_tid]
-                # 锁定率的分母改为 n_agents
-                lock_rate = target_lock_counts.get(real_tid, 0) / max(1, self.conf.n_agents)
+                lock_rate = target_lock_counts.get(real_tid, 0) / self.conf.n_radars
                 target_states[i] = [
                     t.ecf_x / 10000.0, t.ecf_y / 10000.0, t.ecf_z / 10000.0,
                     t.ecf_vx / 10.0, t.ecf_vy / 10.0, t.ecf_vz / 10.0,
@@ -224,12 +199,13 @@ class ScenarioAdapter:
                 ]
         state_elements.append(target_states.flatten())
         
-        # 2. 全盘智能体状态矩阵 (合并雷达和卫星)
-        agent_status = np.zeros((self.conf.n_agents, self.RADAR_STATE_DIM), dtype=np.float32)
+        # 2. 雷达全盘分配与空间状态矩阵 (n_radars, 5)
+        radar_status = np.zeros((self.conf.n_radars, self.RADAR_STATE_DIM), dtype=np.float32)
         sensor_dict = agent_obs.dict_equip_state  
         
-        for i in range(self.conf.n_agents):
-            real_sid = all_agent_keys[i] if i < len(all_agent_keys) else f"AGENT_{i:03d}"
+        for i in range(self.conf.n_radars):
+            #  使用真实雷达 ID 查字典
+            real_sid = radar_keys[i] if i < len(radar_keys) else f"RADAR_{i:03d}"
             s = sensor_dict.get(real_sid)
             if s is not None:
                 assigned_idx = -1.0
@@ -242,49 +218,45 @@ class ScenarioAdapter:
                 r_x_m, r_y_m, r_z_m = pm.geodetic2ecef(s.latitude, s.longitude, s.altitude)
                 r_x_km, r_y_km, r_z_km = r_x_m / 1000.0, r_y_m / 1000.0, r_z_m / 1000.0
                 
-                agent_status[i] = [
+                radar_status[i] = [
                     r_x_km / 10000.0, r_y_km / 10000.0, r_z_km / 10000.0,         
                     len(s.lst_track_no) / max_cap, assigned_idx                  
                 ]
             else:
-                agent_status[i] = [0, 0, 0, 0, -1.0] 
+                radar_status[i] = [0, 0, 0, 0, -1.0] 
                 
-        state_elements.append(agent_status.flatten())
+        state_elements.append(radar_status.flatten())
         
         # 3. 追加时间
         time_norm = np.array([agent_obs.current_time / 600.0], dtype=np.float32)
         state_elements.append(time_norm)
         
+        # 返回63维一维数组
         return np.concatenate(state_elements)
-
 
     def discrete_actions_to_agent_action(self, actions: List[int], current_time: float) -> List[AgentActionCommand]:
         """ RL 输出动作时，包装成含有 ID 的指令"""
         commands = []
         t_int = int(current_time) 
         radar_keys = getattr(self.conf, 'radar_keys', [])
-        satellites_keys = getattr(self.conf, 'satellites_keys', []) # 新增拿到卫星 Keys
         target_keys = getattr(self.conf, 'target_keys', [])
         
-        # 把雷达和卫星的 key 合并起来，因为 n_agents = n_radars + n_satellites
-        all_agent_keys = radar_keys + satellites_keys
-        
-        for i in range(min(len(actions), self.conf.n_agents)):
+        for i in range(min(len(actions), self.conf.n_radars)):
             a = int(actions[i])
-            # 获取对应的真实 ID
-            agent_id = all_agent_keys[i] if i < len(all_agent_keys) else f"AGENT_{i:03d}"
+            # 下达真实 ID
+            sensor_id = radar_keys[i] if i < len(radar_keys) else f"RADAR_{i:03d}"
             
             if a <= 0 or a > self.conf.n_targets:
-                commands.append(AgentActionCommand(time=t_int, str_equip_id=agent_id, str_target_id=""))
+                commands.append(AgentActionCommand(time=t_int, str_equip_id=sensor_id, str_target_id=""))
             else:
                 t_idx = a - 1
                 target_id = target_keys[t_idx] if t_idx < len(target_keys) else f"TARGET_{t_idx:03d}"
-                commands.append(AgentActionCommand(time=t_int, str_equip_id=agent_id, str_target_id=target_id))
+                commands.append(AgentActionCommand(time=t_int, str_equip_id=sensor_id, str_target_id=target_id))
                 
-        # 补齐未分配的智能体待机指令
-        for i in range(len(commands), self.conf.n_agents):
-            agent_id = all_agent_keys[i] if i < len(all_agent_keys) else f"AGENT_{i:03d}"
-            commands.append(AgentActionCommand(time=t_int, str_equip_id=agent_id, str_target_id=""))
+        # 补齐未分配的雷达待机指令
+        for i in range(len(commands), self.conf.n_radars):
+            sensor_id = radar_keys[i] if i < len(radar_keys) else f"RADAR_{i:03d}"
+            commands.append(AgentActionCommand(time=t_int, str_equip_id=sensor_id, str_target_id=""))
             
         return commands
 

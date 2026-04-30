@@ -39,7 +39,7 @@ class QMIX:
         self.eval_hidden = torch.zeros((batch_size, self.n_agents, self.conf.drqn_hidden_dim)).to(self.device)
 
     def learn(self, batch, train_step, epsilon=None):
-        """完美复刻 EPyMARL 的 q_learner.py TD-error 计算逻辑"""
+        """EPyMARL 的 q_learner.py TD-error 计算逻辑"""
         # 1. 提取所有轨迹数据并送入 GPU
         states = torch.tensor(batch['state'], dtype=torch.float32).to(self.device)
         next_states = torch.tensor(batch['next_state'], dtype=torch.float32).to(self.device)

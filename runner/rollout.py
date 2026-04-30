@@ -76,6 +76,23 @@ class RolloutWorker:
             ep_reward += reward
             step_count += 1
 
+            # ================= [修复与新增] =================
+            # 从环境返回的字典中，提取【原始的观测对象】和【解析后的装备动作指令】
+            raw_obs = next_info.get('raw_obs')
+            valid_cmds = next_info.get('agent_actions_list', [])
+
+            # 信息打印
+            from utils.situation_logger import SituationJSONLogger
+            if step_count % 50 == 0 and raw_obs is not None:
+                SituationJSONLogger.print_log(
+                    step=step_count,
+                    obs=raw_obs,           # 注意：必须传 raw_obs (AgentObservation对象)，而不是 numpy 的 next_obs
+                    actions=valid_cmds,    # 传入刚刚提取的动作指令
+                    adapter=self.adapter,
+                    reward=reward
+                )
+            # ===============================================
+
         episode_batch = {k: np.array(v) for k, v in episode_data.items()}
         return ep_reward, step_count, episode_batch
 

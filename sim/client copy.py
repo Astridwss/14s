@@ -1,9 +1,6 @@
 # sim/client.py (原 TrainingEnv)
 import pymap3d as pm
-import numpy as np
 from typing import Dict, List, Tuple
-
-
 from .datastruct import (
     SystemTrackBase, EquipmentState, EquipmentToTargetDetectionResult, 
     AgentObservation, AgentActionCommand
@@ -12,8 +9,7 @@ from .plan_file_process import PlanFileProcess
 
 class TrainingEnv:
     """
-    职责：加载预案、时间步进、推演物理状态。
-    (注：奖励计算逻辑已清空，留待后续基于观测字典重构)
+    加载预案、时间步进、推演物理状态。
     """
     def __init__(self) -> None:
         # 物理真值数据池
@@ -27,7 +23,6 @@ class TrainingEnv:
         self._time_step: int = 1         
         self._current_time: int = 0      
         
-        # 状态暂存
         self._current_obs: AgentObservation = AgentObservation()
         self._last_actions: List[AgentActionCommand] = []
 
@@ -66,7 +61,7 @@ class TrainingEnv:
             terminate_flag = True
             return agent_observation, terminate_flag
 
-        # 2. 生成系统航迹 (天上真有什么)
+        # 2. 生成系统航迹
         for target_info in self._dict_target_info.values():
             if self._current_time in target_info.dict_target_traj_pt_info:
                 pt = target_info.dict_target_traj_pt_info.get(self._current_time)
@@ -103,38 +98,6 @@ class TrainingEnv:
             equip_state.residual_track_num = max(0, equip_state.track_num_max - len(equip_state.lst_track_no))
             agent_observation.dict_equip_state[equip_state.str_equip_id] = equip_state
 
-        # 20260408
-        for satellite_info in self._dict_satellite_info.values():
-            equip_state = EquipmentState()
-            equip_state.time = agent_observation.current_time
-            equip_state.str_equip_id = satellite_info.str_satellite_id
-
-            if agent_observation.current_time in satellite_info.dict_satellite_traj_pt_info:
-                equip_state.longitude = satellite_info.dict_satellite_traj_pt_info.get(
-                    agent_observation.current_time).longitude
-                equip_state.latitude = satellite_info.dict_satellite_traj_pt_info.get(
-                    agent_observation.current_time).latitude
-                equip_state.altitude = satellite_info.dict_satellite_traj_pt_info.get(
-                    agent_observation.current_time).altitude
-
-            equip_state.range_min = 0.0
-            equip_state.range_max = 36000.0
-            equip_state.azi_min = satellite_info.azi_min
-            equip_state.azi_max = satellite_info.azi_max
-            equip_state.ele_min = satellite_info.ele_min
-            equip_state.ele_max = satellite_info.ele_max
-            equip_state.azi_pointing = (satellite_info.azi_min + satellite_info.azi_max) / 2
-            equip_state.ele_pointing = (satellite_info.ele_min + satellite_info.ele_max) / 2
-            equip_state.type = 2
-            equip_state.track_num_max = satellite_info.track_num_max
-
-            target_to_lock = action_map.get(equip_state.str_equip_id)
-            if target_to_lock:
-                equip_state.lst_track_no.append(target_to_lock)
-
-            equip_state.residual_track_num = equip_state.track_num_max - len(equip_state.lst_track_no)
-            agent_observation.dict_equip_state[equip_state.str_equip_id] = equip_state
-
         # 5. 计算可视性矩阵
         for equip_id, equip_info in agent_observation.dict_equip_state.items():
             agent_observation.dict_detection_result[equip_id] = {}
@@ -142,42 +105,14 @@ class TrainingEnv:
                 det_res = EquipmentToTargetDetectionResult(
                     str_equip_id=equip_id, str_target_id=target_id, detectable_flag=False
                 )
-
-                # 20260408
-                if equip_info.type == 1:
-                    a, e, r = pm.geodetic2aer(
-                        system_track.latitude, system_track.longitude, system_track.altitude,
-                        equip_info.latitude, equip_info.longitude, equip_info.altitude
-                    )
-                    if (equip_info.azi_min <= a <= equip_info.azi_max and
-                        equip_info.ele_min <= e <= equip_info.ele_max and
-                        equip_info.range_min <= r / 1000.0 <= equip_info.range_max):
-                        det_res.detectable_flag = True
-                elif equip_info.type == 2:
-                    sat_xyz = pm.geodetic2ecef(equip_info.latitude, equip_info.longitude, equip_info.altitude)
-                    target_xyz = pm.geodetic2ecef(system_track.latitude, system_track.longitude, system_track.altitude)
-                    earth_center = np.array([0.0, 0.0, 0.0])
-                    vec_cam = earth_center - sat_xyz
-                    vec_target = np.array([target_xyz[0], target_xyz[1], target_xyz[2]]) - np.array([sat_xyz[0], sat_xyz[1], sat_xyz[2]])
-
-                    norm_cam = np.linalg.norm(vec_cam)
-                    norm_target = np.linalg.norm(vec_target)
-
-                    if norm_cam == 0 or norm_target == 0:
-                        det_res.detectable_flag = False
-                    else:
-                        dot_product = np.dot(vec_cam, vec_target)
-                        cos_theta = dot_product / (norm_cam * norm_target)
-                        cos_theta = np.clip(cos_theta, -1.0, 1.0)
-                        theta_radians = np.arccos(cos_theta)
-                        theta_degrees = np.degrees(theta_radians)
-
-                        if theta_degrees < equip_info.azi_max:
-                            det_res.detectable_flag = True
-                        else:
-                            det_res.detectable_flag = False
-                else:
-                    continue
+                a, e, r = pm.geodetic2aer(
+                    system_track.latitude, system_track.longitude, system_track.altitude,
+                    equip_info.latitude, equip_info.longitude, equip_info.altitude
+                )
+                if (equip_info.azi_min <= a <= equip_info.azi_max and 
+                    equip_info.ele_min <= e <= equip_info.ele_max and 
+                    equip_info.range_min <= r / 1000.0 <= equip_info.range_max):
+                    det_res.detectable_flag = True
                 
                 agent_observation.dict_detection_result[equip_id][target_id] = det_res
 
@@ -185,21 +120,41 @@ class TrainingEnv:
         return agent_observation, terminate_flag
 
 
+
+        """
+        ld的覆盖个数 U wx的覆盖个数 = 总覆盖个数
+        可见目标个数 - 总覆盖个数 = 漏掉的可见目标
+        min（漏掉的可见个数，ld重叠覆盖浪费个数+wx重叠覆盖浪费个数）
+        
+        漏掉目标 = 0 给最大奖励，并且不扣分
+        漏掉目标 > 0 扣分 = min（漏掉的可见个数，ld重叠覆盖浪费个数+wx重叠覆盖浪费个数）* 15
+        """ 
     def generate_reward(self) -> float:
+        """
+        面向 18(7雷达+11卫星) vs 21 目标 的【异构跨域协同版】奖励函数
+        核心逻辑：
+        1. 允许跨域重叠：雷达和卫星同时盯一个目标，可分别获得奖励。
+        2. 严惩同域重叠：雷达之间、卫星之间依然严惩扎堆。
+        3. 责任隔离的漏检惩罚：只为自己物理可见、且全局无人理睬、且自己有闲置容量的“过失”买单。
+        """
         reward = 0.0
-        if not self._current_obs or not self._last_actions:
+        
+        if not self._current_obs or not self._last_actions: 
             return reward
 
-        radar_can_see = {s_id : set() for s_id in self._dict_radar_info.keys()}
+        # ==========================================
+        # 1. 态势解析：按兵种（雷达/卫星）分别建立专属视野
+        # ==========================================
+        radar_can_see = {s_id: set() for s_id in self._dict_radar_info.keys()}
         sat_can_see = {s_id: set() for s_id in self._dict_satellite_info.keys()}
-
+        
         radar_visible_targets = set()
         sat_visible_targets = set()
 
         for s_id, targets_dict in self._current_obs.dict_detection_result.items():
             is_radar = s_id in radar_can_see
             is_sat = s_id in sat_can_see
-
+            
             for t_id, res in targets_dict.items():
                 if res.detectable_flag:
                     if is_radar:
@@ -209,6 +164,9 @@ class TrainingEnv:
                         sat_can_see[s_id].add(t_id)
                         sat_visible_targets.add(t_id)
 
+        # ==========================================
+        # 2. 动作判定与有效覆盖统计（同兵种去重，跨兵种允许重叠）
+        # ==========================================
         radar_tracked_targets = set()
         sat_tracked_targets = set()
 
@@ -216,165 +174,254 @@ class TrainingEnv:
             if cmd.str_target_id:
                 s_id = cmd.str_equip_id
                 t_id = cmd.str_target_id
-
+                
                 is_radar = s_id in radar_can_see
                 is_sat = s_id in sat_can_see
-
+                
+                # [规则 A：物理底线越界惩罚]
                 if is_radar:
                     if t_id not in radar_can_see.get(s_id, set()):
-                        reward -= 5.0
+                        reward -= 5.0  
                     else:
                         radar_tracked_targets.add(t_id)
+                        
                 elif is_sat:
                     if t_id not in sat_can_see.get(s_id, set()):
                         reward -= 5.0
                     else:
                         sat_tracked_targets.add(t_id)
 
+        # [规则 B：基础覆盖奖励] 
+        # 因为 radar 和 sat 是分开的 set()，如果它们看同一个目标，这里会各自算 1 次奖励。
+        # 完美支持你的需求：“卫星可以跟雷达重叠跟踪”。
         reward += (len(radar_tracked_targets) + len(sat_tracked_targets)) * 10.0
 
+        # ==========================================
+        # 3. 结果导向：责任隔离的过失漏检结算
+        # ==========================================
+        # 全局已经被防空网（无论雷达还是卫星）成功锁定的目标
         global_tracked = radar_tracked_targets | sat_tracked_targets
 
-        radar_missed = radar_tracked_targets - global_tracked
-        sat_missed = sat_tracked_targets - global_tracked
+        # 漏掉的目标必须按兵种的物理视野来算！
+        radar_missed = radar_visible_targets - global_tracked
+        sat_missed = sat_visible_targets - global_tracked
 
+        # 分别计算两个兵种的浪费容量
         radar_wasted_capacity = len(radar_can_see) - len(radar_tracked_targets)
         sat_wasted_capacity = len(sat_can_see) - len(sat_tracked_targets)
 
+        # 真正的过失 (Faulty Misses)
+        # 如果卫星没闲置容量了，即使天上还有一堆只有卫星能看见的目标，卫星的过失也为 0
         radar_faulty = min(radar_wasted_capacity, len(radar_missed))
         sat_faulty = min(sat_wasted_capacity, len(sat_missed))
 
+        # [规则 C：过失漏检惩罚] 
         reward -= (radar_faulty + sat_faulty) * 15.0
 
+        # [强烈建议保留的安全策略] 缩放奖励，防止 QMIX 在 600+ 步长下梯度爆炸
         return float(reward) / 10.0
 
 
-    def generate_reward_BK4(self) -> float:
-        """20260408"""
+
+    def generate_reward_bk4(self) -> float:
+        """
+        面向 7 雷达 vs 21 目标 (容量=1) 的【过失漏检惩罚版】协同奖励函数
+        核心逻辑：
+        1. 必然的漏检不惩罚：总容量只有7，必然有14个目标看不了，这是物理极限，不扣分。
+        2. 过失的漏检严惩罚：如果有雷达重叠/待机（导致容量浪费），且全局视野里明明还有目标没被跟踪，这就是“过失漏检”，严厉扣分！
+        """
         reward = 0.0
-        if not self._current_obs or not self._last_actions:
+        
+        if not self._current_obs or not self._last_actions: 
             return reward
 
-        # 20260409
-        # radar_can_see = {s_id: set() for s_id in self._dict_radar_info.keys()}
-        radar_can_see = {s_id: set() for s_id in self._current_obs.dict_detection_result.keys()}
-        global_visible_targets =  set()
-
+        # ==========================================
+        # 1. 态势解析：建立雷达专属视野 与 全局总视野
+        # ==========================================
+        #radar_can_see = {s_id: set() for s_id in self._dict_radar_info.keys()}
+        radar_can_see = {s_id: set() for s_id in self._current_obs.dict_equip_state.keys()}
+        global_visible_targets = set()  # 当前战区内，对防空网“可见”的所有目标总和
+        
         for s_id, targets_dict in self._current_obs.dict_detection_result.items():
             for t_id, res in targets_dict.items():
                 if res.detectable_flag:
                     radar_can_see[s_id].add(t_id)
                     global_visible_targets.add(t_id)
 
-        success_track_targets = set()
+        # ==========================================
+        # 2. 动作判定与有效覆盖统计
+        # ==========================================
+        successfully_tracked_targets = set()
 
         for cmd in self._last_actions:
             if cmd.str_target_id:
                 s_id = cmd.str_equip_id
                 t_id = cmd.str_target_id
-
+                
+                # [规则 A：物理底线越界惩罚] 瞎指挥，必扣分
                 if t_id not in radar_can_see.get(s_id, set()):
-                    reward -= 5.0
+                    reward -= 5.0  
                 else:
-                    success_track_targets.add(t_id)
+                    successfully_tracked_targets.add(t_id)
+        
+        # [规则 B：基础覆盖奖励] 每合法盯住一个不同的目标，给 10 分（维持智能体积极性）
+        reward += len(successfully_tracked_targets) * 10.0
 
-        reward += len(success_track_targets) * 10.0
+        # ==========================================
+        # 3. 核心创新：计算“过失漏检”并实施惩罚
+        # ==========================================
+        # 漏掉的可见目标 = 全局可见的总目标 - 已经被成功盯上的目标
+        missed_visible_targets = global_visible_targets - successfully_tracked_targets
+        
+        # 浪费的雷达容量 = 雷达总数 - 当前已有效覆盖的目标数
+        # total_radar_capacity = len(self._dict_radar_info) 
+        # wasted_capacity = total_radar_capacity - len(successfully_tracked_targets)
 
-        missed_visible_targets = global_visible_targets - success_track_targets
+        total_agent_capacity = len(self._dict_radar_info) + len(self._dict_satellite_info) 
+        wasted_capacity = total_agent_capacity - len(successfully_tracked_targets)
 
-        # 20260409
-        # total_radar_capacity = len(self._dict_radar_info)
-        total_radar_capacity = len(self._dict_radar_info) + len(self._dict_satellite_info)
+        # 真正的过失 (Faulty Misses)：
+        # 如果容量打满了 (wasted_capacity=0)，即使漏了 14 个，过失也为 0。
+        # 如果没目标了 (len(missed)=0)，即使有 3 部雷达待机，过失也为 0。
+        faulty_misses = min(wasted_capacity, len(missed_visible_targets))
 
-        wastes_capacity = total_radar_capacity - len(success_track_targets)
+        # [规则 C：过失漏检惩罚] 每因为重叠或待机而“白白放跑”一个可见目标，重罚！
+        reward -= faulty_misses * 15.0
 
-        fautly_misses = min(wastes_capacity, len(missed_visible_targets))
+        return float(reward)
+    
 
-        reward -= fautly_misses * 15.0
-
-        return reward
-
-
-    def generate_reward_bk3(self):
-        """20260407"""
+    def generate_reward_bk3(self) -> float:
+        """
+        面向 7 雷达 vs 21 目标 (单设备容量=1) 的极简结果导向协同奖励函数
+        核心逻辑：
+        1. 物理底线：雷达绝不能分配给不在自己探测范围内的目标（严惩）。
+        2. 全局协同：利用 set 集合去重，计算全局真实覆盖的“唯一目标数”（奖励）。
+           - 自动惩罚重叠：多部雷达看同一个目标，去重后只算1个目标的奖励。
+           - 自动惩罚怠工：雷达不干活，去重后的总覆盖数直接减少，错失奖励。
+        """
         reward = 0.0
-        if not self._current_obs or not self._last_actions:
+        
+        # 防御性判断：如果没有观测数据或没有任何动作，直接返回 0
+        if not self._current_obs or not self._last_actions: 
             return reward
 
+        # ==========================================
+        # 1. 态势解析：建立每部雷达的【真实物理可用目标】白名单字典
+        # 结构: {radar_id: set(可见且满足所有物理条件约束的 target_id)}
+        # ==========================================
         radar_can_see = {s_id: set() for s_id in self._dict_radar_info.keys()}
-
+        
         for s_id, targets_dict in self._current_obs.dict_detection_result.items():
             for t_id, res in targets_dict.items():
-                if res.detectable_flag:
+                if res.detectable_flag:  # 这个 flag 是经过严格的 R, A, E 等计算出的物理可见性
                     radar_can_see[s_id].add(t_id)
 
-        success_track_targets = set()
+        # ==========================================
+        # 2. 动作判定与有效覆盖统计
+        # ==========================================
+        successfully_tracked_targets = set()
 
         for cmd in self._last_actions:
+            # 只有当智能体确实下发了某个具体目标时才进行判定（排除了动作 0 即待机指令）
             if cmd.str_target_id:
                 s_id = cmd.str_equip_id
                 t_id = cmd.str_target_id
-
+                
+                # [规则 A：物理底线越界惩罚]
+                # 试图追踪一个根本看不见的目标，属于严重瞎指挥，必须予以打击
                 if t_id not in radar_can_see.get(s_id, set()):
-                    reward -= 5.0
+                    reward -= 5.0  
                 else:
-                    success_track_targets.add(t_id)
-
-        reward += len(success_track_targets) * 10.0
+                    # 动作合法，将该目标加入全局覆盖集合
+                    successfully_tracked_targets.add(t_id)
+        
+        # ==========================================
+        # 3. 结果导向：全局战果结算
+        # ==========================================
+        # [规则 B：全局覆盖奖励] 
+        # 集合(set)天然具备去重功能。
+        # 如果 7 部雷达各看 1 个目标，len 为 7，总奖励为 +70.0（完美协同）。
+        # 如果 7 部雷达全挤在 1 个目标上，len 为 1，总奖励仅为 +10.0（隐性协同惩罚）。
+        reward += len(successfully_tracked_targets) * 10.0
 
         return float(reward)
 
-    def generate_reward_bk2(self):
-        """出所测试用"""
+    def generate_reward_bk2(self) -> float:
+        """
+        面向资源受限 (容量远小于目标数) 的简化协同奖励函数
+        核心：防怠工、防重叠跟踪、最大化有效目标覆盖
+        """
         reward = 0.0
-        if not self._current_obs:
+        if not self._current_obs: 
             return reward
 
+        # ==========================================
+        # 1. 态势解析：建立雷达视角的可用目标字典
+        # 结构: {radar_id: set(可见且合法的 target_id)}
+        # ==========================================
         radar_can_see = {s_id: set() for s_id in self._dict_radar_info.keys()}
-
+        
         for s_id, targets_dict in self._current_obs.dict_detection_result.items():
             for t_id, res in targets_dict.items():
                 if res.detectable_flag:
                     radar_can_see[s_id].add(t_id)
 
-
-        target_locked_by = {t_id:[] for t_id in self._dict_target_info.keys()}
-        radar_tracking = {s_id:[] for s_id in self._dict_radar_info.keys()}
+        # ==========================================
+        # 2. 动作统计
+        # ==========================================
+        target_locked_by = {t_id: [] for t_id in self._dict_target_info.keys()}
+        radar_tracking = {s_id: [] for s_id in self._dict_radar_info.keys()}
 
         for cmd in self._last_actions:
             if cmd.str_target_id:
                 s_id, t_id = cmd.str_equip_id, cmd.str_target_id
-
+                
+                # 非法动作：雷达试图跟踪一个视野外/不可见的目标
                 if t_id not in radar_can_see.get(s_id, set()):
-                    reward -= 5.0
+                    reward -= 5.0  
                 else:
                     radar_tracking[s_id].append(t_id)
                     target_locked_by[t_id].append(s_id)
 
+        # ==========================================
+        # 3. 智能体行为结算 (雷达视角)
+        # ==========================================
         for s_id, tracking_list in radar_tracking.items():
             load = len(tracking_list)
-            capacity = self._dict_radar_info[s_id].track_num_max
+            capacity = self._dict_radar_info[s_id].track_num_max  # 你的场景下是 1
             visible_targets = radar_can_see.get(s_id, set())
 
+            # [规则 A]: 超载惩罚
             if load > capacity:
                 reward -= 10.0 * (load - capacity)
 
+            # [规则 B]: 怠工惩罚 (核心业务要求)
+            # 如果什么都没跟踪，但其实视野里是有目标的，严惩！
             if load == 0 and len(visible_targets) > 0:
-                reward -= 15.0
+                reward -= 15.0 
+                
+            # (补充逻辑)：如果 load == 0 且视野里本来就没目标，这是合理的待机，不奖不惩
 
+        # ==========================================
+        # 4. 全局效能结算 (目标视角)
+        # ==========================================
         for t_id, locked_by_radars in target_locked_by.items():
             lock_count = len(locked_by_radars)
 
+            # [规则 C]: 唯一跟踪奖励
             if lock_count == 1:
-                reward += 10
+                reward += 10.0  # 完美！占用1个容量，贡献1个视野
 
+            # [规则 D]: 冗余浪费惩罚
             elif lock_count > 1:
-                reward += 10.0
-                reward -= 8.0 * (lock_count - 1)
+                # 依然给 10 分的覆盖基础分，但因为浪费了极其宝贵的额外容量，扣除浪费分
+                # 例如：2部雷达看同1个目标，相当于浪费了1个本可以看其他目标的雷达
+                reward += 10.0 
+                reward -= 8.0 * (lock_count - 1) 
 
         return reward
-
-
+    
     def generate_reward_bk1(self) -> float:
         """
         面向接力跟踪与效能节约的多智能体协同奖励函数
@@ -385,7 +432,6 @@ class TrainingEnv:
 
         # ==========================================
         # 1. 物理态势感知与边缘检测
-        # ==========================================
         # 结构: {target_id: {radar_id: is_at_edge (bool)}}
         visible_matrix = {} 
         
