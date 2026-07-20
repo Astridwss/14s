@@ -1,0 +1,99 @@
+syntax="proto2";
+
+//�ڲ���Ϣͷ
+message PR_MSG_HEADER {
+optional uint32 MsgType = 1;		//����,��Ϣ���ͱ���,��ЧֵΪ0
+optional uint32 MsgSubType = 2;		//��Ϣ�����ͱ���,��ЧֵΪ0
+optional uint32 SeatID = 3; //����,���Ͷ�ϯλ���,��ЧֵΪ0
+optional uint32 SoftwareID = 4;		//����,���Ͷ��������,��ЧֵΪ0
+optional uint32 MsgLength = 5;		//����,��Ϣ����,��ЧֵΪ0
+optional int32 Date = 6; //����,����ϵͳ�����ڲ����ɴ���Ϣ�ŵ�����,��2000��1��1���������,������ʾ2000����ǰ������,Ĭ��ֵΪ0,��ЧֵΪTWO_SIGNED_INVALID,ȡ��ǰ�����ϵͳ����
+optional uint32 Time = 7; //����,����ϵͳ�����ڲ����ɴ���Ϣ�ŵ�ʱ��,�Ե���00:00:00Ϊ��׼,��λ:1����,Ĭ��ֵΪ0,ȡ��ǰ�����ϵͳʱ��
+optional uint32 DateAttribute = 8;	//�������ԣ�0-��ʵ, 1-����, 2-�ط�,3-���ݡ� ��ЧֵΪFOUR_UNSIGNED_INVALID
+}
+
+//��ά���ݽṹ
+message PR_THREE_DIMENSION {
+optional double X = 1;	//��ЧֵΪ:DOUBLE_INVALID
+optional double Y = 2;	//��ЧֵΪ:DOUBLE_INVALID
+optional double Z = 3;	//��ЧֵΪ:DOUBLE_INVALID
+}
+
+//��ά���ݽṹ
+message PR_THREE_DIMENSION_FLOAT {
+optional float X = 1;	//��ЧֵΪ:DOUBLE_INVALID
+optional float Y = 2;	//��ЧֵΪ:DOUBLE_INVALID
+optional float Z = 3;	//��ЧֵΪ:DOUBLE_INVALID
+}
+
+//��ά���ݽṹ
+message PR_TWO_DIMENSION {
+optional double X = 1;	//��ЧֵΪ:DOUBLE_INVALID
+optional double Y = 2;	//��ЧֵΪ:DOUBLE_INVALID
+}
+
+//��ά�������ݽṹ
+message PR_THREE_DIMENSION_INT {
+optional int32 X = 1;	//��ЧֵΪ:FOUR_SIGNED_INVALID
+optional int32 Y = 2;	//��ЧֵΪ:FOUR_SIGNED_INVALID
+optional int32 Z = 3;	//��ЧֵΪ:FOUR_SIGNED_INVALID
+}
+
+//ʱ����Ϣ
+message PR_DATE_TIME {
+optional int32 Date = 1;	//����,��2000��1��1���������,������ʾ2000����ǰ������,Ĭ��ֵΪ0��0��ʾ2000��1��1�գ�,��ЧֵΪTWO_SIGNED_INVALID
+optional uint32 Time = 2;	//ʱ��,��λ:1����,�Ե���00:00:00Ϊ��׼,Ĭ��ֵΪ0
+}
+
+//�״������Ϣ����
+message PR_CONTROL_INFO_TYPE {
+optional uint32 InfoType = 1;		//��Ϣ����,1״̬��Ϣ,2������Ϣ,3��Ӧ��Ϣ,4������Ϣ,5Ӧ����Ϣ,��ЧֵFOUR_UNSIGNED_INVALID
+optional uint32 AnserCode = 2;		//��Ӧ��,0����ִ����ȷ,1�����ִ��,��ЧֵFOUR_UNSIGNED_INVALID
+optional uint32 ResponseCode = 3;	//Ӧ����,0����ִ����ȷ,1������ִ��,��ЧֵFOUR_UNSIGNED_INVALID
+optional int32 IdentifyCode = 4;	//ʶ����,1-1023,��ЧTWO_SIGNED_INVALID;
+}
+
+//�״���ƹ�����Ϣ�ṹ
+message PR_PUBLIC_CTRL {
+optional PR_MSG_HEADER MsgHeader = 1;
+optional PR_CONTROL_INFO_TYPE ControlInfoType = 2;	//��Ϣ����
+optional uint32 SrcID = 3;		//��ϢԴ���
+repeated uint32 DestID = 4;		//��Ϣ�ޱ��
+optional uint32 TaskEncode = 5;  //  ��������
+}
+
+//��������������Ϣͷ
+message PR_PUBLIC_CTRL_SLV {
+optional PR_PUBLIC_CTRL PubCtrl = 1;		//����������Ϣͷ
+}
+
+//װ��λ��
+message PR_EQUIPMENT_POSITION {
+optional uint32 EquipID = 1;										//װ��վ��
+optional uint32 EquipType = 2;									//װ�����ͣ�1-�״2-���ǣ�0-����
+optional double Time = 3;											//ʱ�䣬�����ʼʱ�����������λ��s
+optional PR_THREE_DIMENSION GeoPos = 4;			//λ�ã����ȡ�γ�ȡ��߶ȣ���λ��deg��deg��m
+}
+
+//Ŀ��λ��
+message PR_TARGET_POSITION {
+optional uint32 TargetID = 1;									//Ŀ����
+optional double Time = 2;											//ʱ�䣬�����ʼʱ�����������λ��s
+optional PR_THREE_DIMENSION GeoPos = 3;			//λ�ã����ȡ�γ�ȡ��߶ȣ���λ��deg��deg��m
+}
+
+//װ����Ŀ���̽���ϵ
+message PR_EQUIPMENT_TARGET_DETECTION {
+optional uint32 EquipID = 1;										//װ��վ��
+optional uint32 TargetID = 2;									//Ŀ����
+}
+
+//强化学习训练中态势信息推送前台 12290
+message PR_I_RL_TRAINING_SITUATION_TO_FRONT {
+optional PR_PUBLIC_CTRL PubCtrl = 1;													//控制类型消息头
+optional double CurrentTime = 2;															//当前时间，相对起始时间的秒数，单位S
+repeated PR_EQUIPMENT_POSITION EquipPos = 3;								//装备位置
+repeated PR_TARGET_POSITION TargetPos = 4;										//目标位置
+repeated PR_EQUIPMENT_TARGET_DETECTION Detection = 5;				//装备与目标的探测关系
+optional uint32 DataType = 6;																	//1-第一包， 2-最后一包， 0-中间数据
+}

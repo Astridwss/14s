@@ -1,4 +1,4 @@
-from main import prepare_task_context
+#from main import prepare_task_context
 from notifier import RLTrainRequest
 
 __all__ = [

@@ -13,7 +13,7 @@ class RolloutWorker:
         self.adapter = ScenarioAdapter(self.conf)
         self.agents = agents
 
-    def generate_train_episode(self, epsilon, episode_num=0, render_callback=None):
+    def generate_train_episode(self, epsilon, episode_num=0, render_callback=None, step_hooks=None):
         """跑完完整的一局，专用于训练，返回(奖励, 步数, 训练批次数据)"""
         obs, info = self.env.reset()
         state = info['state']
@@ -61,6 +61,11 @@ class RolloutWorker:
             # TV渲染回调
             if render_callback is not None:
                 render_callback(next_info)
+
+            # ZMQ
+            if step_hooks is not None:
+                for hook in step_hooks:
+                    hook(step_count, terminated, truncated, next_info)
 
             # 经验池记录
             self._record_train_step(

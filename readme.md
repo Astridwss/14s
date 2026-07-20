@@ -24,6 +24,7 @@ curl -X POST http://127.0.0.1:8000/api/v1/train/rl \
   "plan_id": "867",
   "load_dir": "",
   "scene_url": "http://127.0.0.1:8080/scene.json",
+  "push_interval": 1,
   "hyperparameters": {
     "show_log": true,
     "seed": 42,

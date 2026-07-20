@@ -117,6 +117,7 @@ class RLTrainRequest(BaseModel):
     max_episodes: int = Field(..., description="最大推演局数", gt=0)
     max_episode_steps: Optional[int] = Field(default=None, description="单个回合的最大步数") 
     algorithm: str = Field(..., description="选择算法: PPO, QMIX等")
+    push_interval: int = Field(default=0, description="多少回合推送一次态势。0表示不推送 2表示推送结束。") # [新增] ZMQ 态势推送配置
     hyperparameters: RLHyperparameters
 
 class ILHyperparameters(BaseModel):

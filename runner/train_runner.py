@@ -17,6 +17,7 @@ _proj_root = Path(__file__).resolve().parent.parent
 if str(_proj_root) not in sys.path:
     sys.path.insert(0, str(_proj_root))
 
+from communication.zmq_publisher import SituationPublisher, ZMQStepHook
 from config import Config
 from env import GroupedEnvWrapper         # 使用分组环境
 from algorithms.qmix.agent import Agents          # QMIX 的 Agents
@@ -56,6 +57,21 @@ class TrainRunner:
                 print(f"[TrainRunner] 加载预训练权重失败，请检查路径或网络结构: {e}")
         else:
             print("[TrainRunner] 未提供 load_dir 或路径不存在，将从头开始随机初始化网络。")
+        # ==========================================================
+
+        # ==================提取 ZMQ 端口和推送间隔，并初始化 Publisher=======================
+        self.push_interval = getattr(self.conf, "push_interval", 0)
+        zmq_port = getattr(self.conf, "zmq_pub_port", 5556)
+        
+        self.zmq_publisher = None
+        self.zmq_hook = None
+        if self.push_interval > 0:
+            self.zmq_publisher = SituationPublisher(port=zmq_port)
+            # 初始化钩子，注入 Publisher 和 TaskID
+            self.zmq_hook = ZMQStepHook(self.zmq_publisher, getattr(self.conf, "task_id", "UNKNOWN"))
+            print(f"[TrainRunner] 态势推送已开启，每 {self.push_interval} 局(及最后一局)推送一次。")
+            import time 
+            time.sleep(1)
         # ==========================================================
 
         self.episode_rewards = []
@@ -111,6 +127,18 @@ class TrainRunner:
 
     def log_and_report(self, episode_idx: int, ep_reward: float, step_count: int, epsilon: float):
         print(f"[Episode {episode_idx}/{self.conf.max_episodes}] ep_reward={ep_reward:.2f}, steps={step_count}, eps={epsilon:.3f}")
+
+    # def _zmq_push_callback(self, raw_obs, valid_cmds, current_sim_time, data_type):
+    #     """执行向平台通信的回调函数"""
+    #     if self.zmq_publisher:
+    #         task_id = getattr(self.conf, "task_id", "UNKNOWN")
+    #         self.zmq_publisher.push_frame(
+    #             task_id=task_id, 
+    #             raw_obs=raw_obs, 
+    #             valid_cmds=valid_cmds, 
+    #             current_time=current_sim_time, 
+    #             data_type=data_type
+    #         )
 
     def _execute_callbacks(self, episode_idx, ep_reward, loss, model_dir, metrics_callback, weight_callback):
         """执行向平台通信的回调函数"""
@@ -170,7 +198,7 @@ class TrainRunner:
         terminate_flag_file = getattr(self.conf, "terminate_flag_file", "")
         # ======================TV==================================
         # 实例化tv_display观察者 (每隔 20 局看一次)
-        live_viewer = LiveObserver(watch_freq=10, fps=30)
+        live_viewer = LiveObserver(watch_freq=20, fps=30)
         # 新增：1. 一次性提前提取预案中的固定航迹
         fixed_path_data = self._get_fixed_trajectories()
         # ======================TV==================================
@@ -196,16 +224,22 @@ class TrainRunner:
                 self.conf.epsilon_finish, 
                 self.conf.epsilon_start - (self.conf.epsilon_start - self.conf.epsilon_finish) * (self.env_steps / self.conf.epsilon_anneal_time)
             )
+            
+            # ======================决定本局要挂载哪些钩子=====================
+            current_hooks = []
+            if self.zmq_hook and (episode_idx % self.push_interval == 0 or episode_idx == self.conf.max_episodes):
+                current_hooks.append(self.zmq_hook)  # 本局需要推送，挂上 ZMQ 钩子
 
             # ======================TV==================================
             #  1. 询问观察者是否需要拉起本局tv_display
             live_viewer.check_and_start(episode_idx, epsilon, fixed_trajectories=fixed_path_data)
 
-            #  2. 传给 Rollout，让它无脑调 callback 即可
+            #  2. 传给 Rollout，让它调 callback 即可
             ep_reward, step_count, ep_data = self.rollout_worker.generate_train_episode(
                 epsilon=epsilon, 
                 episode_num=episode_idx,
-                render_callback=live_viewer.render_callback 
+                render_callback=live_viewer.render_callback,
+                step_hooks=current_hooks   # 传入钩子列表
             )
 
             #  3. 通知观察者本局结束，安全关窗
@@ -233,6 +267,7 @@ class TrainRunner:
             # 6. 执行回调 (推送给平台)
             self._execute_callbacks(episode_idx, ep_reward, loss, model_dir, metrics_callback, weight_callback)
 
+        time.sleep(0.5)
         print("训练管理器：本轮训练结束。")
 
 
