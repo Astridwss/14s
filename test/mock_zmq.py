@@ -1,8 +1,13 @@
 import os
+import sys
+
 os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 
+# 以 `python test/mock_zmq.py` 独立运行时，将仓库根加入 sys.path，使 services 包可导入
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import zmq
-import ProtoStruct_pb2
+from services.zmq.proto import ProtoStruct_pb2
 
 def start_mock_frontend():
     # 🌟 修改点 1：IP 和端口必须指向 ZmsServer 的出口端 5559
@@ -45,7 +50,7 @@ def start_mock_frontend():
                         msg.ParseFromString(payload)
                         
                         # 6. 优雅地打印解析后的数据
-                        print(f"⏱️  仿真时间: {msg.CurrentTime}s | 帧类型 DataType: {msg.DataType}")
+                        print(f"️  仿真时间: {msg.CurrentTime}s | 帧类型 DataType: {msg.DataType}")
                         print(f"📡 装备数量: {len(msg.EquipPos)} | 🎯 目标数量: {len(msg.TargetPos)}")
                         
                         # 验证内部 MsgType 是否正确

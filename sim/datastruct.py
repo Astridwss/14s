@@ -44,7 +44,7 @@ class SensorInfo:
     azi_max: float = 360.0          # 探测方位右界，单位：deg
     ele_min: float = 0.0            # 探测仰角下界，单位：deg
     ele_max: float = 90.0           # 探测仰角上界，单位：deg
-    track_num_max: int = 1          # 最大跟踪容量
+    track_num_max: int = 20          # 最大跟踪容量
 
 
 # 卫星信息
@@ -127,8 +127,8 @@ class EquipmentState:
     ele_pointing: float = 0.0                                           # 俯仰指向，单位：deg
     type: int = 0                                                       # 装备类型，1-雷达，2-卫星，0-其他
     lst_track_no: List[str] = field(default_factory=list)               # 跟踪目标批号列表
-    track_num_max: int = 1                                              # 最大跟踪容量
-    residual_track_num: int = 1                                         # 剩余跟踪容量
+    track_num_max: int = 20                                             # 最大跟踪容量
+    residual_track_num: int = 20                                        # 剩余跟踪容量
 
 
 # 装备对目标的可探测性结果
@@ -148,7 +148,7 @@ class AgentObservation:
     current_time: int = 0                                                                                               # 场景当前时间，单位：s
 
 
-# 智能体动作指令
+# 智能体动作指令   当前只改容量没意义，需要修改AgentActionCommand，改成携带目标列表（multi-hot 动作）
 @dataclass
 class AgentActionCommand:
     time: int = 0                       # 时间，相对于任务开始时间的相对时，单位：s

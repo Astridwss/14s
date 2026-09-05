@@ -87,3 +87,83 @@ curl -X POST http://127.0.0.1:8000/api/v1/train/terminate \
 }'
 
 
+┌───────────────────┬─────────────────────────────────────────────────┐
+│       角色        │                     文件名                      │
+├───────────────────┼─────────────────────────────────────────────────┤
+│ DRQN 智能体网络   │ LD100_WX25_TARGET21_groupsize10_drqn.pkl        │
+├───────────────────┼─────────────────────────────────────────────────┤
+│ 标准 QMIX 混频器  │ LD100_WX25_TARGET21_groupsize10_qmix.pkl        │
+├───────────────────┼─────────────────────────────────────────────────┤
+│ H-QMIX 组内混频器 │ LD100_WX25_TARGET21_groupsize10_lower_mixer.pkl │
+├───────────────────┼─────────────────────────────────────────────────┤
+│ H-QMIX 组间混频器 │ LD100_WX25_TARGET21_groupsize10_upper_mixer.pkl │
+
+
+
+
+  {
+    "max_episodes": 3000,
+    "max_episode_steps": 600,
+    "group_size": 10,
+    "algorithm": "qmix",
+    "task_id": "rl_test_828_1",
+    "plan_id": "867",
+    "load_dir": "",
+    "scene_url": "C:/webace_2026/14s/code/webace-3/mock_scene_100r_25s.json",
+    "push_interval": 1,
+    "hyperparameters": {
+      "show_log": true,
+      "seed": 42,
+      "device": "cuda",
+
+      "learning_rate": 0.0005,
+      "gamma": 0.99,
+      "batch_size": 8,
+      "buffer_size": 32,
+      "train_seq_len": 60,
+      "update_target_params": 200,
+      "grad_norm_clip": 10.0,
+
+      "epsilon_start": 1.0,
+      "epsilon_finish": 0.05,
+      "epsilon_anneal_time": 400000,
+
+      "drqn_hidden_dim": 128,
+      "qmix_hidden_dim": 32,
+      "hyper_hidden_dim": 128
+    }
+  }
+
+{
+  "max_episodes": 5000,
+  "max_episode_steps": 600,
+  "algorithm": "qmix",
+  "hyperparameters": {
+    "show_log": true,
+    "seed": 42,
+    "device": "cpu", 
+
+    "learning_rate": 0.0003,
+    "gamma": 0.99,
+    "batch_size": 32,
+    "buffer_size": 64,
+    "update_target_params": 200,
+    "grad_norm_clip": 10.0,
+
+    "epsilon_start": 1.0,
+    "epsilon_finish": 0.05,
+    "epsilon_anneal_time": 600000,
+
+    "drqn_hidden_dim": 128,
+    "qmix_hidden_dim": 32,
+    "hyper_hidden_dim": 128
+  }
+}
+
+
+{
+  "task_id": "asdf",
+  "algorithm": "qmix",
+  "model_dir": "E:/webace_2026/14s/code/wanght-dev/models/1a2b3c/", 
+  "max_episodes": 1
+}

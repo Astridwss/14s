@@ -1,0 +1,104 @@
+algorithm: qmix  # 默认算法（后端 API 会根据请求动态覆盖这个值）
+
+# ==========================================
+# 公共参数 (Common)
+common:
+  seed: 42
+  device: cpu
+
+# ==========================================
+qmix:
+  # 1. 强化学习控制参数
+  max_episode_steps: 600             
+  learning_rate: 0.0005      # 针对 200 智能体稍微放大
+  gamma: 0.99                
+  batch_size: 32             
+  buffer_size: 2000          
+  update_target_params: 200  
+  grad_norm_clip: 10.0       
+  
+  # 2. 探索率控制
+  epsilon_start: 1.0         
+  epsilon_finish: 0.05       
+  epsilon_anneal_time: 100000
+  optimizer: "RMS"           
+  
+  # 3. 网络结构参数
+  drqn_hidden_dim: 128
+  qmix_hidden_dim: 32
+  hyper_hidden_dim: 128
+  two_hyper_layers: false
+  last_action: true
+  reuse_network: true
+
+  # 4. H-QMIX 分组 (0 = 标准 QMIX, 10 = 每组约10部雷达)
+  group_size: 20
+
+  # 5. 奖励策略 (coverage = 覆盖式, relay = 接力+效能)
+  reward: relay
+
+# ==========================================
+# 算法 2: 模仿学习参数
+drqn_il:
+  batch_size: 32             
+  learning_rate: 0.001       # 监督学习的学习率通常比 RL 略大
+  seq_len: 50                # RNN 时序截断长度
+  train_val_split: 1.0       
+  grad_norm_clip: 10.0       
+  optimizer: "Adam"          
+  
+  # 2. 网络结构参数,必须与 QMIX 绝对一致，否则无法作为预训练权重
+  drqn_hidden_dim: 128
+  qmix_hidden_dim: 32        
+  hyper_hidden_dim: 128      
+  two_hyper_layers: false    
+  last_action: true
+  reuse_network: true
+
+  #3. 样本增强参数
+  aug_factor: 5     #增强倍数
+  use_data_augmentation: True     # 是否开启数据增强
+
+# ==========================================
+# 训练全局控制 (Train 模式公共配置)
+train:
+  max_episodes: 5000             # RL 默认训练回合数
+  rl_num_workers: 8              # RL 并行环境采样 worker 数（>1 启用多进程 rollout；按机器 CPU 核数调，可被环境变量 NUM_ENV_WORKERS 覆盖）
+  utd_ratio: 4                   # UTD 比：每新采 1 局做几次梯度更新（replay 复用，喂饱 GPU；1=原行为，4~8 常用）
+  il_num_workers: 8              # IL 数据加载并行进程数（DataLoader num_workers；独立于 RL 的 env 采样 num_workers；Windows 开发机报错可设 0）
+  load_dir: "./load_dir"
+  epochs: 50                     # IL 默认训练轮数
+  save_frequency: 50             # 保存频率
+  result_dir: ./results
+  model_dir: ./models
+  flag_dir: ./flags
+
+  # 两阶段冻结训练（统一骨架 225 agent）
+  #   phase1_episodes = -1 : LD训练 max_episodes局，WX 不训练
+  #   phase1_episodes =  0 : ld wx 一起训练，各max_episodes局
+  #   phase1_episodes =  N : 第 N 局起自动切 phase2 wx 一起训练。 ld训练max_episode  wx训练max-episode +1 
+  phase1_episodes: -1
+  wx_epsilon: 0.3                # phase2 卫星独立探索率（WX 从零学，给足探索）
+# ┌──────┬──────────────┬──────────────────────┐
+# │ 设置  │ LD 训练局数  │     WX 训练局数       │
+# ├──────┼──────────────┼──────────────────────┤
+# │ -1   │ max_episodes │ 0                    │
+# ├──────┼──────────────┼──────────────────────┤
+# │ 0    │ max_episodes │ max_episodes         │
+# ├──────┼──────────────┼──────────────────────┤
+# │ N    │ max_episodes │ max_episodes − N + 1 │
+# └──────┴──────────────┴──────────────────────┘
+# ==========================================
+eval:
+  max_episodes: 1
+  load_dir: "./load_dir"
+  epsilon: 0.0
+  eval_records_dir: "./eval_records"
+
+# ==========================================
+# 基础设施参数（平台对接 / ZMQ / 网络）
+infra:
+  PLATFORM_BASE_URL: http://127.0.0.1:8080
+  zmq_server_ip: 192.168.1.51
+  zmq_pub_port: 5558
+  push_interval: 1          # 每 N 回合推送一次态势，0=不推送

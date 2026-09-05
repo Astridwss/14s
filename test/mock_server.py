@@ -18,7 +18,11 @@ async def download_scene():
     提供场景文件下载。
     请确保你的 JSON 预案文件（建议改名为 scene.json）与本 mock_server.py 放在同一个目录下
     """
-    file_path = "scene.json" # 这里固定读取你本地的 scene.json 文件
+    # 由 generate_mock_scene.py 生成，位于仓库根目录（本文件的上一级目录）
+    file_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "mock_scene_100r_25s.json",
+    )
     if os.path.exists(file_path):
         print(f"\n[伪装平台] 收到下载请求，正在下发文件: {file_path}")
         # 💡 修复 media_type 为 application/json
@@ -55,6 +59,14 @@ async def receive_eval_result(request: Request):
     print(f"\n🟣 [伪装平台] 收到推演战报 (Eval Result):")
     print(data)
     return {"code": 200, "msg": "Eval Result Received"}
+
+# 3.1 伪装：接收基线对比战报推送（专家预案基线，用于 20% 提升指标）
+@app.post("/api/receive/compare_eval_result")
+async def receive_baseline_eval_result(request: Request):
+    data = await request.json()
+    print(f"\n🟠 [伪装平台] 收到基线战报 (Baseline Eval Result):")
+    print(data)
+    return {"code": 200, "msg": "Baseline Eval Result Received"}
 
 # 4. 伪装：接收训练报错
 @app.post("/prod-api/agent/train/status")

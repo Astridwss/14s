@@ -15,3 +15,5 @@ runner_bk/
 src_bk/
 scenarios/
 static/
+.diff_backup/
+worklog_*.md

@@ -2,7 +2,7 @@
 import pymap3d as pm
 import numpy as np
 from typing import Dict, List, Tuple
-
+from collections import defaultdict  #20260821 
 
 from .datastruct import (
     SystemTrackBase, EquipmentState, EquipmentToTargetDetectionResult, 
@@ -43,6 +43,11 @@ class TrainingEnv:
         self._end_time = int((battle_scene.end_time - battle_scene.start_time) / 1000)
         self._time_step = time_step
 
+    @property
+    def dict_radar_info(self):
+        """雷达信息字典，供 RadarGrouper 聚类使用。"""
+        return self._dict_radar_info
+
     def reset(self) -> AgentObservation:
         """环境重置"""
         self._current_time = self._start_time - self._time_step
@@ -81,7 +86,11 @@ class TrainingEnv:
                 agent_observation.dict_system_track[trk.str_system_track_no] = trk
 
         # 3. 解析动作：把智能体的动作映射到对应的雷达上
-        action_map = {cmd.str_equip_id: cmd.str_target_id for cmd in agent_actions}
+        #2026822 txl
+        #action_map = {cmd.str_equip_id: cmd.str_target_id for cmd in agent_actions}
+        action_map = defaultdict(list)
+        for cmd in agent_actions:
+            action_map[cmd.str_equip_id].append(cmd.str_target_id)
 
         # 4. 生成雷达状态
         for radar_info in self._dict_radar_info.values():
@@ -98,7 +107,10 @@ class TrainingEnv:
             # 执行动作锁定
             target_to_lock = action_map.get(equip_state.str_equip_id)
             if target_to_lock:
-                equip_state.lst_track_no.append(target_to_lock)
+                #20260822 txl
+                equip_state.lst_track_no = target_to_lock[:equip_state.track_num_max]
+            else:
+                equip_state.lst_track_no = []
             
             equip_state.residual_track_num = max(0, equip_state.track_num_max - len(equip_state.lst_track_no))
             agent_observation.dict_equip_state[equip_state.str_equip_id] = equip_state
@@ -130,7 +142,11 @@ class TrainingEnv:
 
             target_to_lock = action_map.get(equip_state.str_equip_id)
             if target_to_lock:
-                equip_state.lst_track_no.append(target_to_lock)
+                #20260822 txl
+                #equip_state.lst_track_no.append(target_to_lock)
+                equip_state.lst_track_no = target_to_lock[:equip_state.track_num_max]
+            else:
+                equip_state.lst_track_no = []
 
             equip_state.residual_track_num = equip_state.track_num_max - len(equip_state.lst_track_no)
             agent_observation.dict_equip_state[equip_state.str_equip_id] = equip_state
@@ -186,6 +202,155 @@ class TrainingEnv:
 
 
     def generate_reward(self) -> float:
+        """
+        200-50-21 规模（200 雷达 + 50 卫星 + 21 目标）协同接力跟踪奖励。
+
+        针对「250 传感器追 21 目标」的大冗余场景，教会智能体：
+          - 覆盖：每个可见目标至少被 1 部传感器锁定；
+          - 效能：不要扎堆，同一目标超过 K 部锁定即为冗余；
+          - 接力：目标走到某传感器探测边缘时，提前由友军接住。
+
+        奖励项（按目标/动作结算）：
+          R_miss      可见目标 0 锁定         -> -20（丢失目标，最高优先级）
+          R_cover     可见目标 >=1 锁定        -> +2
+          R_valid     锁定不可见目标            -> -5（瞎指）
+          R_redundant 同目标 >K 部锁定          -> -5 / 超出部（K=4）
+          R_danger    仅 1 部锁定且处于边缘     -> -3（危险，无友军接力）
+          R_relay     边缘 + 区 双机共轨        -> +8（完美接力）
+
+        注：单智能体每步最多锁定 1 个目标，track_num_max 在当前动作空间下
+        不会触顶，故不设「容量超载」项（旧版 bk1 的该项实为死代码）。
+        """
+        reward = 0.0
+        obs = self._current_obs
+        if not obs or not self._last_actions:
+            return reward
+
+        K = 4  # 冗余容忍上限：同一目标最多 K 部雷达锁定不罚（接力区 2~4 部重叠不扣分）
+
+        # ---- 1. 可见性矩阵 + 边缘判定：{target_id: {sensor_id: is_at_edge}} ----
+        visible = {}  # t_id -> {s_id: is_edge}
+        for s_id, targets in obs.dict_detection_result.items():
+            equip = obs.dict_equip_state.get(s_id)
+            if not equip:
+                continue
+            if equip.type != 1:  # 卫星广播-only，不参与锁定/边缘判定 → 不计入 visible
+                continue
+            for t_id, res in targets.items():
+                if not res.detectable_flag:
+                    continue
+                is_edge = False
+                trk = obs.dict_system_track.get(t_id)
+                if trk:
+                    _, _, r = pm.geodetic2aer(
+                        trk.latitude, trk.longitude, trk.altitude,
+                        equip.latitude, equip.longitude, equip.altitude,
+                    )
+                    is_edge = (r / 1000.0) > (equip.range_max * 0.85)
+                visible.setdefault(t_id, {})[s_id] = is_edge
+
+        # ---- 2. 动作结算：非法动作惩罚 + 每目标锁定者列表 ----
+        locks = {}  # t_id -> [s_id, ...]（仅合法锁定）
+        for cmd in self._last_actions:
+            if not cmd.str_target_id:
+                continue
+            s_id, t_id = cmd.str_equip_id, cmd.str_target_id
+            if t_id not in visible or s_id not in visible[t_id]:
+                reward -= 5.0  # R_valid
+            else:
+                locks.setdefault(t_id, []).append(s_id)
+
+        # ---- 3. 覆盖 / 冗余 / 接力（按目标结算） ----
+        for t_id, able in visible.items():
+            locked = locks.get(t_id, [])
+            n = len(locked)
+
+            if n == 0:
+                reward -= 20.0  # R_miss
+                continue
+
+            reward += 2.0  # R_cover
+
+            if n > K:
+                reward -= 5.0 * (n - K)  # R_redundant
+
+            edge = sum(1 for s in locked if able.get(s, False))
+            comfort = n - edge
+            if n == 1 and edge == 1:
+                reward -= 3.0  # R_danger：边缘孤机，无友军接力
+            elif edge > 0 and comfort > 0:
+                reward += 8.0  # R_relay：边缘 + 区 完美接力
+
+        return float(reward)
+
+    def generate_reward_bk6(self) -> float:
+        """[备份 2026-08-18] 改动前版本：K=2 + 卫星参与动作/重数统计。
+
+        作为"卫星广播-only + K=4"改造的回退点，逻辑与改造前 generate_reward 完全一致。
+        """
+        reward = 0.0
+        obs = self._current_obs
+        if not obs or not self._last_actions:
+            return reward
+
+        K = 2  # 冗余容忍上限：同一目标最多 K 部传感器锁定不罚
+
+        # ---- 1. 可见性矩阵 + 边缘判定：{target_id: {sensor_id: is_at_edge}} ----
+        visible = {}  # t_id -> {s_id: is_edge}
+        for s_id, targets in obs.dict_detection_result.items():
+            equip = obs.dict_equip_state.get(s_id)
+            if not equip:
+                continue
+            for t_id, res in targets.items():
+                if not res.detectable_flag:
+                    continue
+                is_edge = False
+                if equip.type == 1:  # 仅雷达做边缘判定，卫星视作"舒适区"
+                    trk = obs.dict_system_track.get(t_id)
+                    if trk:
+                        _, _, r = pm.geodetic2aer(
+                            trk.latitude, trk.longitude, trk.altitude,
+                            equip.latitude, equip.longitude, equip.altitude,
+                        )
+                        is_edge = (r / 1000.0) > (equip.range_max * 0.85)
+                visible.setdefault(t_id, {})[s_id] = is_edge
+
+        # ---- 2. 动作结算：非法动作惩罚 + 每目标锁定者列表 ----
+        locks = {}  # t_id -> [s_id, ...]（仅合法锁定）
+        for cmd in self._last_actions:
+            if not cmd.str_target_id:
+                continue
+            s_id, t_id = cmd.str_equip_id, cmd.str_target_id
+            if t_id not in visible or s_id not in visible[t_id]:
+                reward -= 5.0  # R_valid
+            else:
+                locks.setdefault(t_id, []).append(s_id)
+
+        # ---- 3. 覆盖 / 冗余 / 接力（按目标结算） ----
+        for t_id, able in visible.items():
+            locked = locks.get(t_id, [])
+            n = len(locked)
+
+            if n == 0:
+                reward -= 20.0  # R_miss
+                continue
+
+            reward += 2.0  # R_cover
+
+            if n > K:
+                reward -= 5.0 * (n - K)  # R_redundant
+
+            edge = sum(1 for s in locked if able.get(s, False))
+            comfort = n - edge
+            if n == 1 and edge == 1:
+                reward -= 3.0  # R_danger：边缘孤机，无友军接力
+            elif edge > 0 and comfort > 0:
+                reward += 8.0  # R_relay：边缘 + 区 完美接力
+
+        return float(reward)
+
+    def generate_reward_bk5(self) -> float:
+        """旧版覆盖式奖励（雷达+卫星），重设计前备份。"""
         reward = 0.0
         if not self._current_obs or not self._last_actions:
             return reward
@@ -250,7 +415,7 @@ class TrainingEnv:
 
 
     def generate_reward_BK4(self) -> float:
-        """20260408"""
+        """20260408 容量只有7，必然有14个目标看不了，这是物理极限，不扣分"""
         reward = 0.0
         if not self._current_obs or not self._last_actions:
             return reward

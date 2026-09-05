@@ -60,7 +60,7 @@ class PlanFileProcess:
                                 radar_info.azi_max = 360.0
                                 radar_info.ele_min = float(dict_radar.get('minElePower', 0))
                                 radar_info.ele_max = float(dict_radar.get('maxElePower', 90))
-                                radar_info.track_num_max = 1
+                                radar_info.track_num_max = 20
                                 battle_scene.dict_radar_id_info[radar_info.str_sensor_id] = radar_info
 
                             # 卫星信息

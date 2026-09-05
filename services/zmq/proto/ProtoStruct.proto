@@ -1,0 +1,101 @@
+syntax="proto2";
+
+// Internal message header
+message PR_MSG_HEADER {
+optional uint32 MsgType = 1;		// Message type code
+optional uint32 MsgSubType = 2;		// Message subtype code
+optional uint32 SeatID = 3;			// Seat ID
+optional uint32 SoftwareID = 4;		// Software ID
+optional uint32 MsgLength = 5;		// Message length
+optional int32 Date = 6;			// Days since 2000-01-01
+optional uint32 Time = 7;			// Milliseconds since 00:00:00
+optional uint32 DateAttribute = 8;	// 0-real, 1-simulated, 2-replay, 3-data
+}
+
+// 3D position (double)
+message PR_THREE_DIMENSION {
+optional double X = 1;
+optional double Y = 2;
+optional double Z = 3;
+}
+
+// 3D position (float)
+message PR_THREE_DIMENSION_FLOAT {
+optional float X = 1;
+optional float Y = 2;
+optional float Z = 3;
+}
+
+// 2D position
+message PR_TWO_DIMENSION {
+optional double X = 1;
+optional double Y = 2;
+}
+
+// 3D position (int32)
+message PR_THREE_DIMENSION_INT {
+optional int32 X = 1;
+optional int32 Y = 2;
+optional int32 Z = 3;
+}
+
+// Date/time info
+message PR_DATE_TIME {
+optional int32 Date = 1;		// Days since 2000-01-01
+optional uint32 Time = 2;		// Milliseconds since 00:00:00
+}
+
+// Control info type
+message PR_CONTROL_INFO_TYPE {
+optional uint32 InfoType = 1;		// 1-status, 2-command, 3-response, 4-data, 5-application
+optional uint32 AnserCode = 2;		// Response code
+optional uint32 ResponseCode = 3;	// Response code
+optional int32 IdentifyCode = 4;	// Identifier, 1-1023
+}
+
+// Public control structure
+message PR_PUBLIC_CTRL {
+optional PR_MSG_HEADER MsgHeader = 1;
+optional PR_CONTROL_INFO_TYPE ControlInfoType = 2;
+optional uint32 SrcID = 3;			// Source ID
+repeated uint32 DestID = 4;			// Destination IDs
+optional uint32 TaskEncode = 5;		// Task code
+}
+
+// Slave control header
+message PR_PUBLIC_CTRL_SLV {
+optional PR_PUBLIC_CTRL PubCtrl = 1;
+}
+
+// Equipment position
+message PR_EQUIPMENT_POSITION {
+optional uint32 EquipID = 1;		// Equipment station ID
+optional uint32 EquipType = 2;		// 1-radar, 2-satellite, 0-other
+optional double Time = 3;			// Seconds since start
+optional PR_THREE_DIMENSION GeoPos = 4;	// lon, lat, alt (deg, deg, m)
+}
+
+// Target position
+message PR_TARGET_POSITION {
+optional uint32 TargetID = 1;		// Target ID
+optional double Time = 2;			// Seconds since start
+optional PR_THREE_DIMENSION GeoPos = 3;	// lon, lat, alt (deg, deg, m)
+}
+
+// Equipment-target detection relation
+message PR_EQUIPMENT_TARGET_DETECTION {
+optional uint32 EquipID = 1;		// Equipment station ID
+optional uint32 TargetID = 2;		// Target ID
+}
+
+// RL training situation push to frontend 12290
+message PR_I_RL_TRAINING_SITUATION_TO_FRONT {
+optional PR_PUBLIC_CTRL PubCtrl = 1;	// Control message header
+optional double CurrentTime = 2;		// Seconds since start
+repeated PR_EQUIPMENT_POSITION EquipPos = 3;	// Equipment positions
+repeated PR_TARGET_POSITION TargetPos = 4;		// Target positions
+repeated PR_EQUIPMENT_TARGET_DETECTION Detection = 5;	// Detection relations
+optional uint32 DataType = 6;		// 1-first, 2-last, 0-middle
+optional uint32 EpisodeIdx = 7;		// Episode index (for demuxing parallel episodes)
+optional uint32 StepIdx = 8;		// Step index within episode
+}

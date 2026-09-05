@@ -3,19 +3,19 @@ name = "wangss-dev"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.12"
 dependencies = [
     "fastapi==0.135.2",
     "matplotlib==3.10.8",
     "numpy==2.4.4",
     "pandas==3.0.1",
+    "protobuf==3.20.3",
     "pydantic==2.12.5",
     "pygame-ce>=2.5.7",
     "pymap3d==3.2.0",
     "pyyaml==6.0.3",
+    "pyzmq>=27.1.0",
     "requests==2.33.0",
-    "torch>=2.11.0",
-    "torchaudio>=2.11.0",
-    "torchvision>=0.26.0",
+    "scikit-learn>=1.6.0",
     "uvicorn==0.42.0",
 ]
