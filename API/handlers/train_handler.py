@@ -7,7 +7,7 @@ from fastapi import BackgroundTasks
 
 from use_cases.config import ConfigAssembler
 from use_cases.pusher import Pusher
-from use_cases.runners import RLTrainRunner, ILTrainRunner, EvalRunner
+from use_cases.runners import RLTrainRunner, ILTrainRunner, EvalRunner, BaselineEvalRunner
 
 
 class TrainHandler:
@@ -81,6 +81,33 @@ class TrainHandler:
             return {
                 "code": 500,
                 "message": f"推演任务失败: {str(e)}",
+                "data": {"taskId": self._task_id, "status": "failed"},
+            }
+        finally:
+            self._cleanup_scene()
+
+    def run_baseline_eval(self) -> dict:
+        """基准推演评估（同步返回结果）—— 只生成专家预案基线，不加载模型权重。"""
+        print(f"[基准推演] 收到请求: {self._task_id}")
+        runner = BaselineEvalRunner(self.conf, self.push)
+        try:
+            result = runner.run()
+            return {
+                "code": 200,
+                "message": "基准推演任务已成功完成",
+                "data": {
+                    "taskId": self._task_id,
+                    "algo": self._request.algorithm,
+                    "status": "finished",
+                    **result,
+                },
+            }
+        except Exception as e:
+            print(f"[基准推演] 失败: {self._task_id} - {e}")
+            self.push.push_error(str(e))
+            return {
+                "code": 500,
+                "message": f"基准推演任务失败: {str(e)}",
                 "data": {"taskId": self._task_id, "status": "failed"},
             }
         finally:

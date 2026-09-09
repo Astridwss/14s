@@ -88,7 +88,7 @@ optional uint32 EquipID = 1;		// Equipment station ID
 optional uint32 TargetID = 2;		// Target ID
 }
 
-// RL training situation push to frontend 12290
+// RL training situation push to frontend 9290
 message PR_I_RL_TRAINING_SITUATION_TO_FRONT {
 optional PR_PUBLIC_CTRL PubCtrl = 1;	// Control message header
 optional double CurrentTime = 2;		// Seconds since start

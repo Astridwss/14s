@@ -223,14 +223,14 @@ class EvalRunner(BaseRunner):
         self._save_dataclass_records_to_json(all_eval_data)
 
         eval_fields = self._build_eval_fields(metric_abs_path, start_time, end_time, cost_seconds)
-        baseline_fields = self._build_baseline_fields()
+        
 
         return {
             "timeSeriesFile": result_abs_path,
             "evalFile": metric_abs_path,
             **eval_fields,
-            **baseline_fields,
         }
+
 
     # ============================================================
     # 结果字段组装
@@ -250,43 +250,6 @@ class EvalRunner(BaseRunner):
         fields["coverage"] = summary.coverage
         return fields
 
-    def _build_baseline_fields(self):
-        """生成专家预案基线并返回基线字段 dict，供 run() 组装 HTTP 响应体。
-
-        返回:
-            {"baselineTimeSeriesFile": records_path,
-             "baselineEvalFile": metric_path,
-             "baselineCoverage": coverage.coverage}
-
-        失败/不可用时字段为 None——**基线失败不得影响推理主流程**，故整段兜底捕获。
-        键集只声明一次：默认全 None，成功后原地覆盖对应值。
-        """
-        fields = {
-            "baselineTimeSeriesFile": None,
-            "baselineEvalFile": None,
-            "baselineCoverage": None,
-        }
-        try:
-            plan_file_info = self._load_plan_file_info()
-            artifacts = BaselineEvaluator().generate_from_plan(
-                plan_result=plan_file_info.plan_result,
-                battle_scene=plan_file_info.battle_scene,
-                out_dir=self.eval_records_dir,
-                task_id=getattr(self.conf, 'task_id', 'local_test'),
-            )
-        except Exception as e:  # 基线是旁路能力，任何异常都不应中断推演主流程
-            print(f"[EvalRunner] 基线数据生成失败（不影响推理主流程）: {e}")
-            return fields
-
-        if not artifacts.available:
-            print(f"[EvalRunner] 基线数据不可用，跳过: {artifacts.reason}")
-            return fields
-
-        fields["baselineTimeSeriesFile"] = artifacts.records_path
-        fields["baselineEvalFile"] = artifacts.metric_path
-        fields["baselineCoverage"] = artifacts.coverage.coverage
-        return fields
-
     # ============================================================
     # 预案文件
     # ============================================================
@@ -296,7 +259,7 @@ class EvalRunner(BaseRunner):
         if self._plan_file_info is None:
             processor = PlanFileProcess()
             self._plan_file_info = processor.read_plan_file_info_from_json(
-                plan_id=getattr(self.conf, 'plan_id', 867),
+                plan_id=self.conf.plan_id,
                 file_path=self.conf.local_scene_path,
             )
         return self._plan_file_info
@@ -370,3 +333,71 @@ class EvalRunner(BaseRunner):
         except (OSError, ValueError, KeyError, AttributeError, ImportError) as e:
             print(f"[EvalRunner] 数据转换与保存失败 [磁盘IO或数据解析异常]: {e}")
             raise
+
+
+class BaselineEvalRunner(BaseRunner):
+    """基准推演评估运行器 —— 单独接口，只生成专家预案基线产物。
+
+    基线来自 scene.json 的 ``splitQuduanResult``（专家规划），与模型推理无关，
+    因此**不继承 EvalRunner**：EvalRunner.__init__ 会强制校验 load_dir、初始化
+    GroupedEnvWrapper + QMIX agents 并加载权重，纯基线场景没有权重会直接
+    FileNotFoundError，且无谓占用环境/网络资源。
+    """
+
+    def __init__(self, conf, push=None):
+        super().__init__(conf, push)
+        self.eval_records_dir = getattr(conf, 'eval_records_dir', './eval_records')
+        os.makedirs(self.eval_records_dir, exist_ok=True)
+        # 预案文件缓存（数 MB，全流程只读一次）
+        self._plan_file_info = None
+
+    def run(self):
+        """基准推演评估主循环（同步返回基线字段）。"""
+        return self._build_baseline_fields()
+
+    def _load_plan_file_info(self):
+        """读取并缓存预案文件（battle_scene + plan_result），全流程只读一次。"""
+        if self._plan_file_info is None:
+            processor = PlanFileProcess()
+            self._plan_file_info = processor.read_plan_file_info_from_json(
+                plan_id=self.conf.plan_id,
+                file_path=self.conf.local_scene_path,
+            )
+        return self._plan_file_info
+
+    def _build_baseline_fields(self):
+        """生成专家预案基线并返回基线字段 dict，供 run() 组装 HTTP 响应体。
+
+        返回:
+            {"baselineTimeSeriesFile": records_path,
+             "baselineEvalFile": metric_path,
+             "baselineCoverage": coverage.coverage}
+
+        失败/不可用时字段为 None——基线是旁路能力，任何异常都不应中断主流程，
+        故整段兜底捕获。键集只声明一次：默认全 None，成功后原地覆盖对应值。
+        """
+        fields = {
+            "timeSeriesFile": None,
+            "evalFile": None,
+            "coverage": None,
+        }
+        try:
+            plan_file_info = self._load_plan_file_info()
+            artifacts = BaselineEvaluator().generate_from_plan(
+                plan_result=plan_file_info.plan_result,
+                battle_scene=plan_file_info.battle_scene,
+                out_dir=self.eval_records_dir,
+                task_id=getattr(self.conf, 'task_id', 'local_test'),
+            )
+        except Exception as e:  # 基线是旁路能力，任何异常都不应中断主流程
+            print(f"[BaselineEvalRunner] 基线数据生成失败（不中断主流程）: {e}")
+            return fields
+
+        if not artifacts.available:
+            print(f"[BaselineEvalRunner] 基线数据不可用，跳过: {artifacts.reason}")
+            return fields
+
+        fields["timeSeriesFile"] = artifacts.records_path
+        fields["evalFile"] = artifacts.metric_path
+        fields["coverage"] = artifacts.coverage.coverage
+        return fields

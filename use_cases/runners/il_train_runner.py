@@ -113,13 +113,13 @@ class ILTrainRunner(BaseRunner):
             torch.cuda.manual_seed_all(tc.seed)
 
     def _ensure_expert_csv(self):
-        """确保专家数据 CSV 已生成。"""
+        """每次都重新生成专家数据 CSV（预案/目标键可能变化，且复用旧文件可能残破过期）。
+
+        generate_expert_csv 内部先写 .tmp 再原子替换，中断不会在目标路径留下残缺文件。
+        """
         ec = self._ec
         scene_path = ec.local_scene_path
         csv_path = os.path.splitext(scene_path)[0] + '.csv'
-
-        if os.path.exists(csv_path) and os.path.getsize(csv_path) > 0:
-            return
 
         print(f"[ILTrainRunner] 生成专家数据 CSV: {csv_path}")
 

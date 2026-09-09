@@ -89,6 +89,7 @@ class EvalRequest(BaseModel):
     """推演评估请求"""
 
     task_id: str
+    plan_id: int = Field(..., description="预案 ID，选取 planInfoList 中对应预案进行推演评估")
     scene_url: str = Field(..., description="平台下发的场景文件本地路径")
     algorithm: str = "qmix"
     load_dir: str = Field(..., description="平台下发的模型绝对路径")
@@ -102,3 +103,18 @@ class TaskActionRequest(BaseModel):
     """任务控制请求（暂停 / 恢复 / 终止）"""
 
     task_id: str
+
+
+class SpeedRequest(BaseModel):
+    """态势轨迹前端消费倍速控制请求"""
+
+    task_id: str
+    speed: float = Field(default=1.0, ge=0.1, le=100.0, description="前端消费倍速（1.0=基准速率，越大消费越快）")
+
+class BaselineEvalRequest(BaseModel):
+    """基准推演评估请求 —— 只生成专家预案基线，不依赖模型权重。"""
+
+    task_id: str
+    plan_id: int = Field(..., description="预案 ID，选取 planInfoList 中对应预案的 splitQuduanResult 作为基线")
+    scene_url: str = Field(..., description="平台下发的场景文件本地路径")
+    algorithm: str = "qmix"

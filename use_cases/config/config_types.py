@@ -70,7 +70,7 @@ class EnvConfig:
     def from_config(cls, conf) -> "EnvConfig":
         """从扁平 RuntimeConfig 或 merged dict 构建。"""
         return cls(
-            plan_id=_get(conf, "plan_id", 867),
+            plan_id=_get(conf, "plan_id", None),
             local_scene_path=_get(conf, "local_scene_path", ""),
             max_episode_steps=_get(conf, "max_episode_steps", 600),
             radar_keys=list(_get(conf, "radar_keys", [])),
@@ -229,6 +229,11 @@ class InfraConfig:
     zmq_pub_port: int
     push_interval: int
 
+    # 态势轨迹推送（并行模式发送线程，见 services/zmq/trajectory_pool.py）
+    situation_base_interval: float      # 1× 倍速时的帧间隔（秒）
+    situation_speed_refresh: float      # 前端倍速参数重读 TTL（秒）
+    situation_warn_episodes: int        # 发送池高水位告警阈值（局）
+
     @classmethod
     def from_config(cls, conf) -> "InfraConfig":
         return cls(
@@ -242,6 +247,9 @@ class InfraConfig:
             terminate_flag_file=_get(conf, "terminate_flag_file", ""),
             platform_base_url=_get(conf, "PLATFORM_BASE_URL", ""),
             zmq_server_ip=_get(conf, "zmq_server_ip", "192.168.1.51"),
-            zmq_pub_port=_get(conf, "zmq_pub_port", 5558),
-            push_interval=_get(conf, "push_interval", 0),
+            zmq_pub_port=int(_get(conf, "zmq_pub_port", 5558)),
+            push_interval=int(_get(conf, "push_interval", 0)),
+            situation_base_interval=float(_get(conf, "situation_base_interval", 0.5)),
+            situation_speed_refresh=float(_get(conf, "situation_speed_refresh", 0.5)),
+            situation_warn_episodes=int(_get(conf, "situation_warn_episodes", 200)),
         )

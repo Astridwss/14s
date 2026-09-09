@@ -17,6 +17,7 @@ from services.sample.rollout import RolloutWorker
 from utils.situation_logger import SituationLogHook
 from utils.epsilon_schedule import EpsilonSchedule
 from services.zmq.zmq_push import TrainingSituationPushService
+from services.zmq.trajectory_pool import SituationTrajectory
 from utils.seed import set_seeds
 from utils.cpu_cores import clamp_workers
 from utils.reward_plot import save_reward_plot
@@ -175,11 +176,27 @@ class RLTrainRunner(BaseRunner):
         if self.n_workers > 1:
             self.n_workers = clamp_workers(self.n_workers)
         self._parallel = None
+        self._situation_pool = None
+        self._situation_sender = None
         if self.n_workers > 1:
             from services.sample.parallel_rollout import ParallelRollout
             self._parallel = ParallelRollout(conf, group_assignments, self.n_workers)
-            print(f"[RLTrainRunner] 并行环境采样已启用: {self.n_workers} workers "
-                  f"（并行模式下每步 hooks / 可视化 / ZMQ 态势推送关闭）")
+            print(f"[RLTrainRunner] 并行环境采样已启用: {self.n_workers} workers")
+            # 并行模式：态势轨迹走「采集→入池→独立发送线程」路径，ZMQ 推送移出 step 循环
+            # （训练 replay buffer 与发送池是两个独立池子；发送池无上限 FIFO、不丢最旧，
+            #   水位由前端倍速参数调节）。
+            if self._zmq is not None:
+                from services.zmq.trajectory_pool import SituationPool, SituationSender
+                self._situation_pool = SituationPool(warn_episodes=ic.situation_warn_episodes)
+                self._situation_sender = SituationSender(
+                    publisher=self._zmq.publisher,
+                    task_id=getattr(conf, 'task_id', 'UNKNOWN'),
+                    pool=self._situation_pool,
+                    base_interval=ic.situation_base_interval,
+                    speed_refresh=ic.situation_speed_refresh,
+                )
+                self._situation_sender.start()
+                print("[RLTrainRunner] 态势轨迹池 + 独立发送线程已启动（前端倍速参数生效中）")
 
     # ============================================================
     # 公开 API
@@ -215,15 +232,34 @@ class RLTrainRunner(BaseRunner):
                 weights = self.agents.get_inference_weights()
                 n_this_round = min(round_size, self.max_episodes - episode_idx)
                 episode_indices = list(range(episode_idx + 1, episode_idx + n_this_round + 1))
-                results = self._parallel.generate_episodes(weights, phase, eps, episode_indices)
 
-                for ep_reward, step_count, ep_data in results:
+                # ---- 计时埋点：rollout 墙钟（N 局并发，含权重广播与轨迹回收的 pickle 开销） ----
+                t_rollout = time.perf_counter()
+                results = self._parallel.generate_episodes(weights, phase, eps, episode_indices)
+                t_rollout = time.perf_counter() - t_rollout
+                learn_total = 0.0
+                learn_steps = 0
+
+                # 态势轨迹先整批入池：并行本轮已一次产出 N 局，若留在下方 learn_batch
+                # 循环里逐局入池，投喂节奏会被学习/保存/推送拖成「1 局/次」，发送线程随之
+                # 饿死（池空）。先整批投喂，发送线程才有连续积压可发，speed 才能调节流量。
+                if self._situation_pool is not None:
+                    for (_, _, _, frames), eidx in zip(results, episode_indices):
+                        if frames:
+                            self._situation_pool.put(SituationTrajectory(episode_idx=eidx, frames=frames))
+
+                for ep_reward, step_count, ep_data, frames in results:
                     episode_idx += 1
                     self.env_steps += step_count
                     self.episode_rewards.append(ep_reward)
-                    self.buffer.store_episode(ep_data)
-
+                    self.buffer.store_episode(ep_data) #训练buffer
+                   
+                    t_learn = time.perf_counter()
                     loss = self._learn_batch(eps, self.utd_ratio)
+                    t_learn = time.perf_counter() - t_learn
+                    learn_total += t_learn
+                    if loss is not None:
+                        learn_steps += self.utd_ratio
 
                     print(f"[Episode {episode_idx}/{self.max_episodes}] "
                           f"ep_reward={ep_reward:.2f}, steps={step_count}, eps={eps:.3f}")
@@ -247,10 +283,27 @@ class RLTrainRunner(BaseRunner):
                             "algo": "qmix", "task_id": task_id,
                             "planId": getattr(self.conf, 'plan_id', 'unknown'),
                         })
+
+                # ---- 计时汇总：本轮 rollout vs learning 墙钟，折算 learning 成为瓶颈的 worker 上限 ----
+                if learn_steps > 0:
+                    t_grad = learn_total / learn_steps
+                    w_max = t_rollout / max(self.utd_ratio * t_grad, 1e-9)
+                    tail = (f"单步梯度={t_grad * 1000:.2f}ms | "
+                            f"learning 成为瓶颈的 worker 上限≈{int(w_max)}")
+                else:
+                    tail = "learning 未启动（buffer 未攒满 batch_size）"
+                print(f"[计时] 本轮(episode 至 {episode_idx}): "
+                      f"rollout={t_rollout:.2f}s (N={n_this_round} 并发) | "
+                      f"learning={learn_total:.2f}s ({learn_steps} 步) | "
+                      f"learn/rollout={learn_total / max(t_rollout, 1e-6):.3f} | {tail}")
         finally:
             # 训练结束（跑满 / 暂停 / 终止 / 异常）都必须回收 spawn 出的 worker 进程：
             # 否则 N 个 worker 各持一份 env + 网络副本常驻，多次训练任务累加泄漏进程与显存。
             self._parallel.close()
+            # 停发送线程：正常结束会发完池中剩余轨迹再退出；前端消费过慢由 finish 超时兜底
+            if self._situation_sender is not None:
+                self._situation_sender.finish()
+                self._situation_sender = None
 
         print("训练管理器：本轮训练结束（并行模式）。")
 

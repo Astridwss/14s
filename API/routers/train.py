@@ -3,7 +3,7 @@
 """
 from fastapi import APIRouter, BackgroundTasks
 
-from schema.request import RLTrainRequest, ILTrainRequest, EvalRequest
+from schema.request import RLTrainRequest, ILTrainRequest, EvalRequest, BaselineEvalRequest
 from API.handlers import TrainHandler
 
 router = APIRouter(tags=["训练与推演"])
@@ -22,3 +22,7 @@ def start_il_training(request: ILTrainRequest, background_tasks: BackgroundTasks
 @router.post("/eval/start")
 def start_eval_task(request: EvalRequest):
     return TrainHandler(request, mode="eval").run_eval()
+
+@router.post("/baseline_eval/start")
+def start_baseline_eval_task(request: BaselineEvalRequest):
+    return TrainHandler(request, mode="baseline").run_baseline_eval()

@@ -1,15 +1,15 @@
 #ifndef DATA_STRUCT_INCLUDE_MACRO
 #define DATA_STRUCT_INCLUDE_MACRO
 
-//================================ÎÞÐ§Öµ¶¨Òå===============================//
+//================================ï¿½ï¿½Ð§Öµï¿½ï¿½ï¿½ï¿½===============================//
 #define MINUS_VALUE -1
-#define FOUR_SIGNED_INVALID 0x80000000		//ËÄ×Ö½ÚÎÞ·ûºÅÐÍÎÞÐ§ÖµÎª×î´óÖµ,ÓÐ·ûºÅÐÔÎÞÐ§ÖµÎª-2147483648
-#define FOUR_UNSIGNED_INVALID 0xffffffff	//ËÄ×Ö½ÚÎÞ·ûºÅÐÍÎÞÐ§ÖµÎª×î´óÖµ
-#define DOUBLE_INVALID -9999999.0			//double ÀàÐÍÎÞÐ§Öµ
-#define FLOAT_INVALID -9999999.0			//float ÀàÐÍÎÞÐ§Öµ
-#define ALTITUDE_INVALID -9999999			//¸ß¶È×Ö¶ÎÎÞÐ§Öµ
+#define FOUR_SIGNED_INVALID 0x80000000		//ï¿½ï¿½ï¿½Ö½ï¿½ï¿½Þ·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð§ÖµÎªï¿½ï¿½ï¿½Öµ,ï¿½Ð·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð§ÖµÎª-2147483648
+#define FOUR_UNSIGNED_INVALID 0xffffffff	//ï¿½ï¿½ï¿½Ö½ï¿½ï¿½Þ·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð§ÖµÎªï¿½ï¿½ï¿½Öµ
+#define DOUBLE_INVALID -9999999.0			//double ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð§Öµ
+#define FLOAT_INVALID -9999999.0			//float ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð§Öµ
+#define ALTITUDE_INVALID -9999999			//ï¿½ß¶ï¿½ï¿½Ö¶ï¿½ï¿½ï¿½Ð§Öµ
 
-//Ç¿»¯Ñ§Ï°ÑµÁ·ÖÐÌ¬ÊÆÐÅÏ¢ÍÆËÍÇ°Ì¨
-#define PR_ID_RL_TRAINING_SITUATION_TO_FRONT 12290
+//Ç¿ï¿½ï¿½Ñ§Ï°Ñµï¿½ï¿½ï¿½ï¿½Ì¬ï¿½ï¿½ï¿½ï¿½Ï¢ï¿½ï¿½ï¿½ï¿½Ç°Ì¨
+#define PR_ID_RL_TRAINING_SITUATION_TO_FRONT 9290
 
 #endif//DATA_STRUCT_INCLUDE 

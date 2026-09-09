@@ -25,7 +25,7 @@ def start_mock_frontend():
     socket.connect(connect_addr)
     
     # 3. 设置订阅主题 (空字符串表示接收总线上的所有数据)
-    # 如果你只想接收强化学习的数据，可以写成 socket.setsockopt_string(zmq.SUBSCRIBE, "12290")
+    # 如果你只想接收强化学习的数据，可以写成 socket.setsockopt_string(zmq.SUBSCRIBE, "9290")
     socket.setsockopt_string(zmq.SUBSCRIBE, "")
     print(f"✅ [伪装前端] 已成功连接到总线 {connect_addr}，等待接收态势数据...\n" + "="*50)
 
@@ -36,14 +36,14 @@ def start_mock_frontend():
             
             # 通常我们发送了两帧：[topic, payload]
             if len(multipart_msg) >= 2:
-                # 🌟 这里的 topic 现在应该是纯字符串 "12290"
+                # 🌟 这里的 topic 现在应该是纯字符串 "9290"
                 topic = multipart_msg[0].decode('utf-8')
                 payload = multipart_msg[1]
                 
                 print(f"\n📥 收到主题: {topic} (数据大小: {len(payload)} bytes)")
                 
-                # 只有当主题是 12290 时才按我们的结构体解析
-                if topic == "12290":
+                # 只有当主题是 9290 时才按我们的结构体解析
+                if topic == "9290":
                     # 5. Protobuf 反序列化
                     msg = ProtoStruct_pb2.PR_I_RL_TRAINING_SITUATION_TO_FRONT()
                     try:

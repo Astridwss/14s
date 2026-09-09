@@ -5,7 +5,7 @@
 """
 from fastapi import APIRouter
 
-from schema.request import TaskActionRequest
+from schema.request import TaskActionRequest, SpeedRequest
 from API.handlers.control_handler import ControlHandler
 
 router = APIRouter(tags=["任务控制"])
@@ -24,3 +24,8 @@ def resume_training_task(request: TaskActionRequest):
 @router.post("/train/terminate")
 def terminate_training_task(request: TaskActionRequest):
     return ControlHandler(request.task_id).terminate()
+
+
+@router.post("/train/speed")
+def set_speed(request: SpeedRequest):
+    return ControlHandler(request.task_id).set_speed(request.speed)

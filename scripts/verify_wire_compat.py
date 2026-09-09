@@ -25,7 +25,7 @@ mod = SourceFileLoader('pb2mod', sys.argv[1]).load_module()
 m = mod.PR_I_RL_TRAINING_SITUATION_TO_FRONT()
 m.CurrentTime = 12.5
 m.DataType = 1
-m.PubCtrl.MsgHeader.MsgType = 12290
+m.PubCtrl.MsgHeader.MsgType = 9290
 e = m.EquipPos.add(); e.EquipID=101; e.EquipType=1; e.Time=12.5; e.GeoPos.X=1; e.GeoPos.Y=2; e.GeoPos.Z=3
 t = m.TargetPos.add(); t.TargetID=7; t.Time=12.5; t.GeoPos.X=3; t.GeoPos.Y=4; t.GeoPos.Z=5
 d = m.Detection.add(); d.EquipID=101; d.TargetID=7

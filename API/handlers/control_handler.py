@@ -35,3 +35,10 @@ class ControlHandler:
             "code": 200,
             "message": f"已向任务 {self._task_id} 发送终止指令",
         }
+
+    def set_speed(self, speed: float) -> dict:
+        TaskController.set_speed(self._task_id, speed)
+        return {
+            "code": 200,
+            "message": f"已设置任务 {self._task_id} 消费倍速为 {speed}",
+        }

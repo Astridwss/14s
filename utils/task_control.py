@@ -45,6 +45,12 @@ class TaskController:
             TaskController._flag_dir(), f"{task_id}_terminate.flag"
         )
 
+    @staticmethod
+    def speed_path(task_id: str) -> str:
+        return os.path.join(
+            TaskController._flag_dir(), f"{task_id}_speed.flag"
+        )
+
     # ============================================================
     # HTTP 控制 —— 写标志文件
     # ============================================================
@@ -69,6 +75,21 @@ class TaskController:
             f.write("TERMINATE")
         # 同时清除暂停标志，避免被暂停阻塞
         cls.resume(task_id)
+
+    @classmethod
+    def set_speed(cls, task_id: str, speed: float) -> None:
+        """下发前端消费倍速（写 speed 标志文件，发送线程按 TTL 重读）。"""
+        with open(cls.speed_path(task_id), "w") as f:
+            f.write(str(float(speed)))
+
+    @classmethod
+    def read_speed(cls, task_id: str, default: float = 1.0) -> float:
+        """读取前端消费倍速；文件不存在或非法时返回 default。"""
+        try:
+            with open(cls.speed_path(task_id)) as f:
+                return float(f.read().strip())
+        except (OSError, ValueError):
+            return default
 
     # ============================================================
     # 运行时轮询

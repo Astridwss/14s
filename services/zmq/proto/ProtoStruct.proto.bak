@@ -88,7 +88,7 @@ optional uint32 EquipID = 1;										//װ��վ��
 optional uint32 TargetID = 2;									//Ŀ����
 }
 
-//强化学习训练中态势信息推送前台 12290
+//强化学习训练中态势信息推送前台 9290
 message PR_I_RL_TRAINING_SITUATION_TO_FRONT {
 optional PR_PUBLIC_CTRL PubCtrl = 1;													//控制类型消息头
 optional double CurrentTime = 2;															//当前时间，相对起始时间的秒数，单位S

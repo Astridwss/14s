@@ -14,40 +14,76 @@ http://127.0.0.1:8000/map?task_id=任务ID
 
 
 # 测试强化学习训练启动
-curl -X POST http://127.0.0.1:8000/api/v1/train/rl \
+
+curl -X POST http://7.81.21.52:8066/api/v1/train/rl \
 -H "Content-Type: application/json" \
 -d '{
-  "max_episodes": 30,
-  "max_episode_steps": 1800,
-  "algorithm": "qmix",
-  "task_id": "RLtest1",
-  "plan_id": "867",
-  "load_dir": "",
-  "scene_url": "http://127.0.0.1:8080/scene.json",
-  "push_interval": 1,
-  "hyperparameters": {
-    "show_log": true,
-    "seed": 42,
-    "device": "npu",
-    "learning_rate": 0.0005,
-    "gamma": 0.99,
-    "batch_size": 32,
-    "buffer_size": 2000
-  }
+		"max_episodes": 3000,
+		"max_episode_steps": 60,
+		"group_size": 10,
+		"algorithm": "qmix",
+		"task_id": "rl_test_828_1",
+		"plan_id": "1081",
+		"load_dir": "",
+		"scene_url": "/home/kylin/14229/back/20260906/code-0906/f18d2315-7d7d-4ad6-b00f-85aaaa68074f.json",
+		"push_interval": 1,
+		"rl_num_workers": 16,
+		"hyperparameters": {
+		  "show_log": true,
+		  "seed": 42,
+		  "device": "npu",
+
+		  "learning_rate": 0.0005,
+		  "gamma": 0.99,
+		  "batch_size": 8,
+		  "buffer_size": 32,
+		  "train_seq_len": 60,
+		  "update_target_params": 200,
+		  "grad_norm_clip": 10.0,
+
+		  "epsilon_start": 1.0,
+		  "epsilon_finish": 0.05,
+		  "epsilon_anneal_time": 400000,
+
+		  "drqn_hidden_dim": 128,
+		  "qmix_hidden_dim": 32,
+		  "hyper_hidden_dim": 128
+		}
 }'
 
-# 测试模仿学习训练启动
-curl -X POST http://127.0.0.1:8000/api/v1/train/il \
+
+# 模仿学习训练启动
+curl -X POST http://7.81.21.52:8066/api/v1/train/il \
 -H "Content-Type: application/json" \
 -d '{
   "task_id": "ILtest867", 
-  "plan_id": "867",
+  "plan_id": "1081",
   "load_dir": "",
-  "scene_url": "http://127.0.0.1:8080/scene.json",         
-  "algorithm": "drqn_il",     
-  "epochs": 2,                                         
-  "hyperparameters": {             
-    "seq_len": 50,                   
+  "scene_url": "/home/kylin/14229/back/20260906/code-0906/f18d2315-7d7d-4ad6-b00f-85aaaa68074f.json",         
+  "algorithm": "drqn",     
+  "epochs": 200,                                         
+  "hyperparameters": {
+    "seq_len": 50,
+    "device": "npu",                      
+    "learning_rate": 0.001,
+    "batch_size": 64            
+  }
+}'
+
+
+
+curl -X POST http://0.0.0.0:8000/api/v1/train/il \
+-H "Content-Type: application/json" \
+-d '{
+  "task_id": "ILtest867", 
+  "plan_id": "1081",
+  "load_dir": "",
+  "scene_url": "/home/kylin/14229/back/20260906/code-0906/f18d2315-7d7d-4ad6-b00f-85aaaa68074f.json",         
+  "algorithm": "drqn",     
+  "epochs": 200,                                         
+  "hyperparameters": {
+    "seq_len": 50,
+    "device": "npu",                      
     "learning_rate": 0.001,
     "batch_size": 32            
   }
@@ -58,8 +94,19 @@ curl -X POST http://127.0.0.1:8000/api/v1/eval/start \
 -H "Content-Type: application/json" \
 -d '{
   "task_id": "RLinfer",
-  "plan_id": "867",
-  "scene_url": "http://127.0.0.1:8080/scene.json",
+  "plan_id": "1081",
+  "scene_url": "/home/kylin/14229/back/20260906/code-0906/f18d2315-7d7d-4ad6-b00f-85aaaa68074f.json",
+  "algorithm": "qmix",
+  "load_dir": "E:/webace_2026/14s/code/wangss-dev/models/ILtest867", 
+  "max_episodes": 1
+}'
+
+# Baseline启动推演评估
+curl -X POST http://127.0.0.1:8000/api/v1/baseline_eval/start \
+-H "Content-Type: application/json" \
+-d '{
+  "plan_id": "1081",
+  "scene_url": "/home/kylin/14229/back/20260906/code-0906/f18d2315-7d7d-4ad6-b00f-85aaaa68074f.json",
   "algorithm": "qmix",
   "load_dir": "E:/webace_2026/14s/code/wangss-dev/models/ILtest867", 
   "max_episodes": 1
@@ -100,70 +147,3 @@ curl -X POST http://127.0.0.1:8000/api/v1/train/terminate \
 
 
 
-
-  {
-    "max_episodes": 3000,
-    "max_episode_steps": 600,
-    "group_size": 10,
-    "algorithm": "qmix",
-    "task_id": "rl_test_828_1",
-    "plan_id": "867",
-    "load_dir": "",
-    "scene_url": "C:/webace_2026/14s/code/webace-3/mock_scene_100r_25s.json",
-    "push_interval": 1,
-    "hyperparameters": {
-      "show_log": true,
-      "seed": 42,
-      "device": "cuda",
-
-      "learning_rate": 0.0005,
-      "gamma": 0.99,
-      "batch_size": 8,
-      "buffer_size": 32,
-      "train_seq_len": 60,
-      "update_target_params": 200,
-      "grad_norm_clip": 10.0,
-
-      "epsilon_start": 1.0,
-      "epsilon_finish": 0.05,
-      "epsilon_anneal_time": 400000,
-
-      "drqn_hidden_dim": 128,
-      "qmix_hidden_dim": 32,
-      "hyper_hidden_dim": 128
-    }
-  }
-
-{
-  "max_episodes": 5000,
-  "max_episode_steps": 600,
-  "algorithm": "qmix",
-  "hyperparameters": {
-    "show_log": true,
-    "seed": 42,
-    "device": "cpu", 
-
-    "learning_rate": 0.0003,
-    "gamma": 0.99,
-    "batch_size": 32,
-    "buffer_size": 64,
-    "update_target_params": 200,
-    "grad_norm_clip": 10.0,
-
-    "epsilon_start": 1.0,
-    "epsilon_finish": 0.05,
-    "epsilon_anneal_time": 600000,
-
-    "drqn_hidden_dim": 128,
-    "qmix_hidden_dim": 32,
-    "hyper_hidden_dim": 128
-  }
-}
-
-
-{
-  "task_id": "asdf",
-  "algorithm": "qmix",
-  "model_dir": "E:/webace_2026/14s/code/wanght-dev/models/1a2b3c/", 
-  "max_episodes": 1
-}

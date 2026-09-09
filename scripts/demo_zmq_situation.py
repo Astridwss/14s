@@ -64,7 +64,7 @@ msg.DataType = 0
 if with_new:
     msg.EpisodeIdx = 7
     msg.StepIdx = 33
-msg.PubCtrl.MsgHeader.MsgType = 12290
+msg.PubCtrl.MsgHeader.MsgType = 9290
 
 for eid, es in raw_obs.dict_equip_state.items():
     e = msg.EquipPos.add()

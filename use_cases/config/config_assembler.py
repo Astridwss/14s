@@ -187,7 +187,11 @@ class ConfigAssembler:
 
     def _parse_scene(self) -> None:
         """从场景文件提取实体元数据，推导智能体/动作/观测维度。"""
-        plan_id = self._api_params.get("plan_id", 867)
+        plan_id = self._api_params.get("plan_id")
+        if plan_id is None:
+            raise ValueError(
+                "[ConfigAssembler] 缺少 plan_id：训练/推演/基线请求必须显式传入 plan_id。"
+            )
 
         n_radars, n_satellites, n_targets, radar_keys, target_keys, sat_keys = extract_entities(self._scene_path, plan_id)
 

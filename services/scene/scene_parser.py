@@ -151,7 +151,7 @@ def _normalize_scene_id_types(scene_path: str) -> str:
     return tmp_path
 
 
-def extract_entities(scene_path: str, plan_id: int = 867) -> Tuple[int, int, int, List[str], List[str], List[str]]:
+def extract_entities(scene_path: str, plan_id: int) -> Tuple[int, int, int, List[str], List[str], List[str]]:
     """解析场景 JSON，返回实体数量与 ID 列表。
 
     Returns:

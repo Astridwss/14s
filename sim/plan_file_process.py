@@ -1,15 +1,14 @@
 # 预案文件处理类
 # sim/plan_file_process.py 的头部导入区域
 import json
-import csv
 from typing import List, Dict
-import pymap3d as pm
 from .datastruct import (
-    PlanFileInfo, BattleScene, EquipmentDetectionTime, PlanResult, 
+    PlanFileInfo, BattleScene, EquipmentDetectionTime, PlanResult,
     AgentActionCommand, TargetTrajPtInfo, TargetInfo, SensorInfo, SatelliteInfo,
 )
 from .two_dim_coordinate import TwoDimensionMinMax
 from .ganttchart import GanttChart, OverlappingNumberRequirement
+
 
 class PlanFileProcess:
     # =======================================================
@@ -25,8 +24,9 @@ class PlanFileProcess:
                 plan_info_list = data.get('planInfoList', [])
                 for dict_plan_info in plan_info_list:
                     # 🚨 核心修复 1：兼容多种 ID
-                    current_id = dict_plan_info.get('planId') or dict_plan_info.get('associatedTaskId') or dict_plan_info.get('id')
-                    
+                    current_id = dict_plan_info.get('planId') or dict_plan_info.get(
+                        'associatedTaskId') or dict_plan_info.get('id')
+
                     if current_id == plan_id or len(plan_info_list) == 1:
                         battle_scene.start_time = dict_plan_info.get('startTime', 0)
                         battle_scene.end_time = dict_plan_info.get('endTime', 0)
@@ -56,8 +56,16 @@ class PlanFileProcess:
                                 range_max = float(dict_radar.get('maxDetectionRange', 4000))
                                 radar_info.range_max = range_max * pow(1.0 / max_detection_rcs, 0.25)
 
-                                radar_info.azi_min = 0.0
-                                radar_info.azi_max = 360.0
+                                # radar_info.azi_min = 0.0
+                                # radar_info.azi_max = 360.0
+
+                                radar_info.azi_min = float(
+                                    dict_radar.get('radarZMCX', 0) - dict_radar.get('radarDSFW', 0) / 2.0)
+                                radar_info.azi_max = float(
+                                    dict_radar.get('radarZMCX', 360) + dict_radar.get('radarDSFW', 0) / 2.0)
+
+                                #print(f"left：{radar_info.azi_min}, right:{radar_info.azi_max}")
+
                                 radar_info.ele_min = float(dict_radar.get('minElePower', 0))
                                 radar_info.ele_max = float(dict_radar.get('maxElePower', 90))
                                 radar_info.track_num_max = 20
@@ -152,12 +160,13 @@ class PlanFileProcess:
                 plan_info_list = data.get('planInfoList', [])
                 for dict_plan_info in plan_info_list:
                     # 🚨 同步修改：兼容真实的 ID 字段
-                    current_id = dict_plan_info.get('planId') or dict_plan_info.get('associatedTaskId') or dict_plan_info.get('id')
-                    
+                    current_id = dict_plan_info.get('planId') or dict_plan_info.get(
+                        'associatedTaskId') or dict_plan_info.get('id')
+
                     if current_id == plan_id or len(plan_info_list) == 1:
                         str_split_quduan_result = dict_plan_info.get('splitQuduanResult')
                         if not str_split_quduan_result: continue
-                        
+
                         split_quduan_result_data = json.loads(str_split_quduan_result)
 
                         if isinstance(split_quduan_result_data, dict):
@@ -172,14 +181,18 @@ class PlanFileProcess:
                                         detection_time = EquipmentDetectionTime()
                                         detection_time.str_equip_id = str_equip_id
                                         detection_time.str_target_id = str_target_id
-                                        detection_time.time_range = TwoDimensionMinMax(dict_quduan.get('x'), dict_quduan.get('y'))
+                                        detection_time.time_range = TwoDimensionMinMax(dict_quduan.get('x'),
+                                                                                       dict_quduan.get('y'))
 
                                         if str_equip_id not in plan_result.dict_equip_id_target_id_detection_time:
                                             plan_result.dict_equip_id_target_id_detection_time[str_equip_id] = {}
-                                        if str_target_id not in plan_result.dict_equip_id_target_id_detection_time[str_equip_id]:
-                                            plan_result.dict_equip_id_target_id_detection_time[str_equip_id][str_target_id] = []
+                                        if str_target_id not in plan_result.dict_equip_id_target_id_detection_time[
+                                            str_equip_id]:
+                                            plan_result.dict_equip_id_target_id_detection_time[str_equip_id][
+                                                str_target_id] = []
 
-                                        plan_result.dict_equip_id_target_id_detection_time[str_equip_id][str_target_id].append(detection_time)
+                                        plan_result.dict_equip_id_target_id_detection_time[str_equip_id][
+                                            str_target_id].append(detection_time)
         except Exception as e:
             print(f"解析规划结果失败：{e}")
         return plan_result
@@ -193,12 +206,13 @@ class PlanFileProcess:
         plan_file_info.plan_result = self.read_plan_result_from_json(plan_id=plan_id, file_path=file_path)
         return plan_file_info
 
-    
     # =======================================================
     # 5. 推演结果生成与保存相关 (保持空壳和占位不变)
     # =======================================================
     # 将模型推理结果，转换为规划结果
-    def write_model_inference_result_to_plan_result(self, dict_model_inference_result: Dict[int, List[AgentActionCommand]], time_cut: int = 20) -> PlanResult:
+    def write_model_inference_result_to_plan_result(self,
+                                                    dict_model_inference_result: Dict[int, List[AgentActionCommand]],
+                                                    time_cut: int = 20) -> PlanResult:
         plan_result = PlanResult()
 
         # print(dict_model_inference_result.keys())
@@ -209,20 +223,26 @@ class PlanFileProcess:
                 if model_inference_result.str_equip_id not in plan_result.dict_equip_id_target_id_detection_time:
                     plan_result.dict_equip_id_target_id_detection_time[model_inference_result.str_equip_id] = {}
 
-                if model_inference_result.str_target_id not in plan_result.dict_equip_id_target_id_detection_time[model_inference_result.str_equip_id]:
-                    plan_result.dict_equip_id_target_id_detection_time[model_inference_result.str_equip_id][model_inference_result.str_target_id] = []
+                if model_inference_result.str_target_id not in plan_result.dict_equip_id_target_id_detection_time[
+                    model_inference_result.str_equip_id]:
+                    plan_result.dict_equip_id_target_id_detection_time[model_inference_result.str_equip_id][
+                        model_inference_result.str_target_id] = []
 
-                if len(plan_result.dict_equip_id_target_id_detection_time[model_inference_result.str_equip_id][model_inference_result.str_target_id]) == 0:
+                if len(plan_result.dict_equip_id_target_id_detection_time[model_inference_result.str_equip_id][
+                           model_inference_result.str_target_id]) == 0:
                     detection_time = EquipmentDetectionTime()
                     detection_time.str_equip_id = model_inference_result.str_equip_id
                     detection_time.str_target_id = model_inference_result.str_target_id
                     detection_time.time_range.value_min = model_inference_result.time
                     detection_time.time_range.value_max = model_inference_result.time
 
-                    plan_result.dict_equip_id_target_id_detection_time[model_inference_result.str_equip_id][model_inference_result.str_target_id].append(detection_time)
+                    plan_result.dict_equip_id_target_id_detection_time[model_inference_result.str_equip_id][
+                        model_inference_result.str_target_id].append(detection_time)
 
                 else:
-                    last_detection_time = plan_result.dict_equip_id_target_id_detection_time[model_inference_result.str_equip_id][model_inference_result.str_target_id][-1]
+                    last_detection_time = \
+                    plan_result.dict_equip_id_target_id_detection_time[model_inference_result.str_equip_id][
+                        model_inference_result.str_target_id][-1]
 
                     if model_inference_result.time - last_detection_time.time_range.value_max < time_cut:
                         last_detection_time.time_range.value_max = model_inference_result.time
@@ -234,7 +254,8 @@ class PlanFileProcess:
                         detection_time.time_range.value_min = model_inference_result.time
                         detection_time.time_range.value_max = model_inference_result.time
 
-                        plan_result.dict_equip_id_target_id_detection_time[model_inference_result.str_equip_id][model_inference_result.str_target_id].append(detection_time)
+                        plan_result.dict_equip_id_target_id_detection_time[model_inference_result.str_equip_id][
+                            model_inference_result.str_target_id].append(detection_time)
 
         print(plan_result.dict_equip_id_target_id_detection_time.keys())
 
@@ -257,7 +278,8 @@ class PlanFileProcess:
                     if 'vquDuanList' not in dict_task_result:
                         dict_task_result['vquDuanList'] = []
 
-                    dict_task_result['vquDuanList'].append({'x': detection_time.time_range.value_min, 'y':detection_time.time_range.value_max})
+                    dict_task_result['vquDuanList'].append(
+                        {'x': detection_time.time_range.value_min, 'y': detection_time.time_range.value_max})
 
                 dict_task_result['strTaskName'] = 'ALL'
                 data['splitQuduanResult']['vtaskResult'].append(dict_task_result)
@@ -293,7 +315,6 @@ class PlanFileProcess:
             gantt_chart = GanttChart()
             gantt_chart.str_body_name = str_target_id
 
-
             for str_equip_id, lst_detection_time in dict_equip_id_detection_time.items():
                 for detection_time in lst_detection_time:
                     if str_equip_id not in gantt_chart.dict_activity:
@@ -301,16 +322,23 @@ class PlanFileProcess:
 
                     gantt_chart.dict_activity[str_equip_id].append(detection_time.time_range)
 
-
-            lst_result_over_one_cover: List[Tuple[TwoDimensionMinMax, List[str]]] = gantt_chart.overlapping_number_analysis_in_total(0, OverlappingNumberRequirement.OVERLAPPING_NUMBER_REQUIREMENT_LARGER)
-            lst_result_one_cover: List[Tuple[TwoDimensionMinMax, List[str]]] = gantt_chart.overlapping_number_analysis_in_total(1, OverlappingNumberRequirement.OVERLAPPING_NUMBER_REQUIREMENT_EQUAL)
-            lst_result_two_cover: List[Tuple[TwoDimensionMinMax, List[str]]] = gantt_chart.overlapping_number_analysis_in_total(2, OverlappingNumberRequirement.OVERLAPPING_NUMBER_REQUIREMENT_EQUAL)
-            lst_result_over_three_cover: List[Tuple[TwoDimensionMinMax, List[str]]] = gantt_chart.overlapping_number_analysis_in_total(2, OverlappingNumberRequirement.OVERLAPPING_NUMBER_REQUIREMENT_LARGER)
+            lst_result_over_one_cover: List[
+                Tuple[TwoDimensionMinMax, List[str]]] = gantt_chart.overlapping_number_analysis_in_total(0,
+                                                                                                         OverlappingNumberRequirement.OVERLAPPING_NUMBER_REQUIREMENT_LARGER)
+            lst_result_one_cover: List[
+                Tuple[TwoDimensionMinMax, List[str]]] = gantt_chart.overlapping_number_analysis_in_total(1,
+                                                                                                         OverlappingNumberRequirement.OVERLAPPING_NUMBER_REQUIREMENT_EQUAL)
+            lst_result_two_cover: List[
+                Tuple[TwoDimensionMinMax, List[str]]] = gantt_chart.overlapping_number_analysis_in_total(2,
+                                                                                                         OverlappingNumberRequirement.OVERLAPPING_NUMBER_REQUIREMENT_EQUAL)
+            lst_result_over_three_cover: List[
+                Tuple[TwoDimensionMinMax, List[str]]] = gantt_chart.overlapping_number_analysis_in_total(2,
+                                                                                                         OverlappingNumberRequirement.OVERLAPPING_NUMBER_REQUIREMENT_LARGER)
 
             target_traj_total_time = 1800
             if str_target_id in battle_scene.dict_target_id_info:
-                target_traj_total_time = len(battle_scene.dict_target_id_info.get(str_target_id).dict_target_traj_pt_info)
-
+                target_traj_total_time = len(
+                    battle_scene.dict_target_id_info.get(str_target_id).dict_target_traj_pt_info)
 
             if target_traj_total_time > 0:
                 dict_target_eva_result['vecContinuityResult'] = []
@@ -322,10 +350,11 @@ class PlanFileProcess:
                     over_one_cover_time = over_one_cover_time + time_range.range()
 
                     if i < len(lst_result_over_one_cover) - 1:
-                        if abs(lst_result_over_one_cover[i + 1][0].value_min - time_range.value_max) > 1e-6:\
-                            interrupt_num += 1
+                        if abs(lst_result_over_one_cover[i + 1][0].value_min - time_range.value_max) > 1e-6: \
+                                interrupt_num += 1
 
-                dict_continuity_result = {'dDetectCoverAge': over_one_cover_time / target_traj_total_time * 100.0, 'regionType': 'ENUM_COMPREHENSIVE', 'uiInterruputNum': interrupt_num}
+                dict_continuity_result = {'dDetectCoverAge': over_one_cover_time / target_traj_total_time * 100.0,
+                                          'regionType': 'ENUM_COMPREHENSIVE', 'uiInterruputNum': interrupt_num}
                 dict_target_eva_result['vecContinuityResult'].append(dict_continuity_result)
 
                 one_cover_time = 0
@@ -343,7 +372,8 @@ class PlanFileProcess:
                 dict_reliability_result = {}
                 dict_reliability_result['regionType'] = 'ENUM_COMPREHENSIVE'
                 dict_reliability_result['vecCovernumCoverage'] = [
-                    {'dVal': (target_traj_total_time - over_one_cover_time) / target_traj_total_time * 100.0, 'uiCoverNum': 0},
+                    {'dVal': (target_traj_total_time - over_one_cover_time) / target_traj_total_time * 100.0,
+                     'uiCoverNum': 0},
                     {'dVal': one_cover_time / target_traj_total_time * 100.0, 'uiCoverNum': 1},
                     {'dVal': two_cover_time / target_traj_total_time * 100.0, 'uiCoverNum': 2},
                     {'dVal': over_three_cover_time / target_traj_total_time * 100.0, 'uiCoverNum': 3}
@@ -361,18 +391,21 @@ class PlanFileProcess:
 
         return
 
-
     # 将模型推理结果，转换为json格式的预案文件
-    def write_model_inference_result_to_json(self, dict_model_inference_result: Dict[int, List[AgentActionCommand]], dest_path: str) -> None:
-        plan_result = self.write_model_inference_result_to_plan_result(dict_model_inference_result=dict_model_inference_result)
+    def write_model_inference_result_to_json(self, dict_model_inference_result: Dict[int, List[AgentActionCommand]],
+                                             dest_path: str) -> None:
+        plan_result = self.write_model_inference_result_to_plan_result(
+            dict_model_inference_result=dict_model_inference_result)
         self.write_plan_result_to_json(plan_result=plan_result, dest_path=dest_path)
 
         return
 
     # 将模型推理结果，转换为json格式的预案评估文件
-    def write_model_inference_metric_to_json(self, dict_model_inference_result: Dict[int, List[AgentActionCommand]], battle_scene: BattleScene, dest_path: str) -> None:
+    def write_model_inference_metric_to_json(self, dict_model_inference_result: Dict[int, List[AgentActionCommand]],
+                                             battle_scene: BattleScene, dest_path: str) -> None:
         plan_file_process = PlanFileProcess()
-        plan_result = self.write_model_inference_result_to_plan_result(dict_model_inference_result=dict_model_inference_result)
+        plan_result = self.write_model_inference_result_to_plan_result(
+            dict_model_inference_result=dict_model_inference_result)
         self.write_plan_metric_to_json(plan_result=plan_result, battle_scene=battle_scene, dest_path=dest_path)
 
         return
