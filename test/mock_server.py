@@ -21,7 +21,7 @@ async def download_scene():
     # 由 generate_mock_scene.py 生成，位于仓库根目录（本文件的上一级目录）
     file_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-        "mock_scene_100r_25s.json",
+        "mock_scene_200r_50s_21t.json",
     )
     if os.path.exists(file_path):
         print(f"\n[伪装平台] 收到下载请求，正在下发文件: {file_path}")

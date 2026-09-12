@@ -4,7 +4,7 @@
 自包含积木：接收实体 ID 列表和维度，不依赖 Config。
 """
 import numpy as np
-from typing import List
+from typing import List, Optional
 from sim import AgentActionCommand, AgentObservation
 
 
@@ -12,11 +12,14 @@ class ActionMapper:
     """RL 动作空间与引擎指令的双向映射。"""
 
     def __init__(self, agent_keys: List[str], target_keys: List[str],
-                 n_agents: int, n_actions: int):
+                 n_agents: int, n_actions: int, satellite_keys: Optional[List[str]] = None):
         self.agent_keys = agent_keys
         self.target_keys = target_keys
         self.n_agents = n_agents
         self.n_actions = n_actions
+        # 显式卫星 key 集合：诊断「卫星多指向」用，不靠 id 位数猜
+        # （mock 场景里雷达 100xxx / 卫星 200xxx 都是 6 位，按位数会把雷达误判成卫星）。
+        self._satellite_keys = set(satellite_keys or [])
 
         # 启动时构建 O(1) 查找表
         self._agent_idx = {sid: i for i, sid in enumerate(agent_keys)}
@@ -72,5 +75,16 @@ class ActionMapper:
                     commands.append(AgentActionCommand(
                         time=t_int, str_equip_id=agent_id, str_target_id=target_id,
                     ))
+
+        # ---- 诊断打印（排查「卫星多指向」）：按显式卫星 key 集合判断，不按 id 位数 ----
+        # from collections import Counter
+        # _cnt = Counter(c.str_equip_id for c in commands)
+        # _sat_multi = {k: v for k, v in _cnt.items()
+        #               if v > 1 and k in self._satellite_keys}
+        # if _sat_multi:
+        #     print(f"[ActionMapper DEBUG] ⚠️ 卫星单步发多条指令: {_sat_multi}")
+        # elif not getattr(self, "_diag_logged", False):
+        #     self._diag_logged = True
+        #     print(f"[ActionMapper DEBUG] 诊断已生效，本步各装备指令数: {dict(_cnt)}")
 
         return commands

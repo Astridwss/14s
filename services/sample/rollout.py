@@ -14,7 +14,6 @@ from typing import Any, Callable, Dict, List, Optional
 import numpy as np
 import torch
 
-
 # ============================================================
 # StepContext —— 不可变数据载体
 # ============================================================

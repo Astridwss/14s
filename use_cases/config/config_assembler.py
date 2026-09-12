@@ -45,7 +45,7 @@ class RuntimeConfig:
 
     def __repr__(self) -> str:
         algo = getattr(self, "algorithm", "?")
-        mode = "train" if getattr(self, "train", False) else "eval"
+        mode = getattr(self, "mode", "?")
         return f"RuntimeConfig(algorithm={algo}, mode={mode})"
 
 
@@ -268,7 +268,7 @@ class ConfigAssembler:
             model_dir = self._merged.get("model_dir", "./models")
             if not os.path.isabs(model_dir):
                 model_dir = os.path.join(project_root, model_dir)
-            model_dir = os.path.join(model_dir, self._task_id)
+            model_dir = os.path.normpath(os.path.join(model_dir, self._task_id))
             os.makedirs(model_dir, exist_ok=True)
             self._merged["model_dir"] = model_dir
 
@@ -276,7 +276,7 @@ class ConfigAssembler:
             result_dir = self._merged.get("result_dir", "./results")
             if not os.path.isabs(result_dir):
                 result_dir = os.path.join(project_root, result_dir)
-            result_dir = os.path.join(result_dir, self._task_id)
+            result_dir = os.path.normpath(os.path.join(result_dir, self._task_id))
             os.makedirs(result_dir, exist_ok=True)
             self._merged["result_dir"] = result_dir
         else:
@@ -286,7 +286,7 @@ class ConfigAssembler:
             )
             if not os.path.isabs(eval_dir):
                 eval_dir = os.path.join(project_root, eval_dir)
-            eval_dir = os.path.join(eval_dir, self._task_id)
+            eval_dir = os.path.normpath(os.path.join(eval_dir, self._task_id))
             os.makedirs(eval_dir, exist_ok=True)
             self._merged["eval_records_dir"] = eval_dir
 
@@ -318,10 +318,9 @@ class ConfigAssembler:
 
         config = RuntimeConfig()
 
-        # 模式标识
+        # 模式标识（唯一来源 config.mode，供 InfraConfig/Runner 区分 train/eval/baseline；
+        # 不再设置 config.train/config.eval 布尔值 —— 二者会与下方聚焦子配置冲突）
         config.mode = self._mode
-        config.train = (self._mode == "train")
-        config.eval = (self._mode == "eval")
         config.task_id = self._task_id
 
         # 批量写入所有合并后的参数（向后兼容：Runner 中 conf.xxx 直接访问）

@@ -13,6 +13,7 @@ import utils.pymap3d_cache  # noqa: F401  缓存 WGS84 椭球常量，消除 pym
 from sim import TrainingEnv
 from services.scene.action.mapper import ActionMapper
 from services.scene.state.builder import ObservationBuilder
+from services.scene.state.satellite_draw import compute_satellite_fov_targets
 from services.scene.reward import RewardCalculator
 from use_cases.config.config_types import EnvConfig
 
@@ -31,12 +32,15 @@ class GroupedEnvWrapper:
 
         # 1. 引擎初始化
         self._sim = TrainingEnv()
-        self._sim.load_battle_scene(ec.plan_id, ec.local_scene_path)
+        self._sim.load_battle_scene(ec.plan_id, ec.local_scene_path, time_step=ec.time_step)
 
         self._max_episode_steps = ec.max_episode_steps
         self._step_count = 0
         self._current_time = 0
         self._prev_actions = None  # 上一步动作列表（切换惩罚用）
+
+        # 卫星视场补充信息：静态卫星信息（全程不变，缓存一次，仅绘制用）
+        self._satellite_info = self._sim._dict_satellite_info
 
         # 2. 组装场景积木
         agent_keys = ec.agent_keys
@@ -56,6 +60,7 @@ class GroupedEnvWrapper:
             target_keys=ec.target_keys,
             n_agents=ec.n_agents,
             n_actions=ec.n_actions,
+            satellite_keys=list(satellite_keys),
         )
 
         self._reward_calc = RewardCalculator(
@@ -67,6 +72,16 @@ class GroupedEnvWrapper:
     def dict_radar_info(self):
         """雷达信息字典，供 RadarGrouper 聚类使用。"""
         return self._sim.dict_radar_info
+    
+    # 20260912 TaoXL add
+    @property
+    def dict_satellite_info(self):
+        return self._satellite_info
+
+    @property
+    def dict_target_info(self):
+        return self._sim._dict_target_info
+    # 20260912 TaoXL add end
 
     def set_phase(self, phase: int) -> None:
         """同步训练阶段：phase1 屏蔽 R_wx（纯 LD 标定），phase2 解冻 WX 奖励。"""
@@ -103,8 +118,16 @@ class GroupedEnvWrapper:
             prev_onehot=self._prev_actions,
         )
         self._prev_actions = np.asarray(actions).copy()
-        terminated = bool(sim_terminated)
+        terminated = bool(sim_terminated)  # 自然结束：current_time > _end_tim
         truncated = bool(self._step_count >= self._max_episode_steps)
+
+        # 卫星视场覆盖（仅绘制补充，不参与训练；旁路异常不影响主流程）
+        try:
+            satellite_fov = compute_satellite_fov_targets(
+                raw_obs, self._satellite_info, agent_actions,
+            )
+        except Exception:
+            satellite_fov = []
 
         return (
             self._obs_builder.build_observations(raw_obs),
@@ -118,5 +141,6 @@ class GroupedEnvWrapper:
                 "agent_actions_list": agent_actions,
                 "action_time": action_time,
                 "reward_breakdown": reward_breakdown,
+                "satellite_fov": satellite_fov,
             },
         )

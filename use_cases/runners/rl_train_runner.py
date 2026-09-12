@@ -16,11 +16,11 @@ from services.sample.buffer import EpisodeReplayBuffer
 from services.sample.rollout import RolloutWorker
 from utils.situation_logger import SituationLogHook
 from utils.epsilon_schedule import EpsilonSchedule
-from services.zmq.zmq_push import TrainingSituationPushService
-from services.zmq.trajectory_pool import SituationTrajectory
+from services.zmq.situation_publisher import TrainingSituationPushService
+from services.zmq.situation_pool import SituationTrajectory
 from utils.seed import set_seeds
 from utils.cpu_cores import clamp_workers
-from utils.reward_plot import save_reward_plot
+from utils.reward_plot import save_reward_plot, save_loss_plot
 from utils.reward_diagnostics import RewardBreakdownHook
 from services.scene.grouping import RadarGrouper
 
@@ -75,7 +75,7 @@ class RLTrainRunner(BaseRunner):
             satellites = len(ec.satellites_keys)
             print(f"\n{'='*60}")
             print(f"[H-QMIX] 统一骨架双头 + 层次化分组混频已启用")
-            print(f"[软件版本号]: V0.0.0.3")
+            print(f"[软件版本号]: V0.0.0.5")
             print(f"  雷达(LD):   {ec.n_radars} (多标签 top-{getattr(ac, 'ld_n_actions', 0)} 选 20)")
             print(f"  卫星(WX):   {satellites} (单选, phase2 解冻)")
             print(f"  目标数量:   {ec.n_targets}")
@@ -153,6 +153,7 @@ class RLTrainRunner(BaseRunner):
         self._update_steps = 0
         self.env_steps = 0
         self.episode_rewards = []
+        self.episode_losses = []
 
         os.makedirs(self.result_dir, exist_ok=True)
         os.makedirs(self.model_dir, exist_ok=True)
@@ -186,8 +187,12 @@ class RLTrainRunner(BaseRunner):
             # （训练 replay buffer 与发送池是两个独立池子；发送池无上限 FIFO、不丢最旧，
             #   水位由前端倍速参数调节）。
             if self._zmq is not None:
-                from services.zmq.trajectory_pool import SituationPool, SituationSender
-                self._situation_pool = SituationPool(warn_episodes=ic.situation_warn_episodes)
+                from services.zmq.situation_pool import SituationPool
+                from services.zmq.situation_sender import SituationSender
+                self._situation_pool = SituationPool(
+                    warn_episodes=ic.situation_warn_episodes,
+                    max_episodes=ic.situation_pool_max,
+                )
                 self._situation_sender = SituationSender(
                     publisher=self._zmq.publisher,
                     task_id=getattr(conf, 'task_id', 'UNKNOWN'),
@@ -245,7 +250,7 @@ class RLTrainRunner(BaseRunner):
                 # 饿死（池空）。先整批投喂，发送线程才有连续积压可发，speed 才能调节流量。
                 if self._situation_pool is not None:
                     for (_, _, _, frames), eidx in zip(results, episode_indices):
-                        if frames:
+                        if frames and self._should_push_episode(eidx):
                             self._situation_pool.put(SituationTrajectory(episode_idx=eidx, frames=frames))
 
                 for ep_reward, step_count, ep_data, frames in results:
@@ -260,6 +265,7 @@ class RLTrainRunner(BaseRunner):
                     learn_total += t_learn
                     if loss is not None:
                         learn_steps += self.utd_ratio
+                    self.episode_losses.append(loss)
 
                     print(f"[Episode {episode_idx}/{self.max_episodes}] "
                           f"ep_reward={ep_reward:.2f}, steps={step_count}, eps={eps:.3f}")
@@ -268,6 +274,8 @@ class RLTrainRunner(BaseRunner):
                     self._maybe_save(episode_idx, is_last)
                     save_reward_plot(self.episode_rewards,
                                      os.path.join(self.result_dir, "episode_reward.png"))
+                    save_loss_plot(self.episode_losses,
+                                   os.path.join(self.result_dir, "episode_loss.png"))
 
                     if self.push is not None:
                         self.push.push_metrics({
@@ -355,6 +363,7 @@ class RLTrainRunner(BaseRunner):
             self.buffer.store_episode(ep_data)
 
             loss = self._learn_batch(eps, self.utd_ratio)
+            self.episode_losses.append(loss)
 
             print(f"[Episode {episode_idx}/{self.max_episodes}] ", f"ep_reward={ep_reward:.2f}, steps={step_count}, eps={eps:.3f}")
 
@@ -362,6 +371,8 @@ class RLTrainRunner(BaseRunner):
             self._maybe_save(episode_idx, is_last)
             save_reward_plot(self.episode_rewards,
                              os.path.join(self.result_dir, "episode_reward.png"))
+            save_loss_plot(self.episode_losses,
+                           os.path.join(self.result_dir, "episode_loss.png"))
 
             if self.push is not None:
                 self.push.push_metrics({
@@ -387,6 +398,13 @@ class RLTrainRunner(BaseRunner):
     # ============================================================
     # 内部
     # ============================================================
+
+    def _should_push_episode(self, episode_idx: int) -> bool:
+        """该局是否应推送态势（命中推送间隔或末局），与串行 get_step_hooks 同口径。"""
+        push_interval = getattr(self.conf, 'push_interval', 0)
+        if push_interval <= 0:
+            return False
+        return episode_idx % push_interval == 0 or episode_idx == self.max_episodes
 
     def _phase_for_episode(self, episode_idx: int) -> int:
         """根据 phase1_episodes 计算当前局所属训练阶段。

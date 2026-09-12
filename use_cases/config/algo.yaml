@@ -5,22 +5,24 @@ algorithm: qmix  # 默认算法（后端 API 会根据请求动态覆盖这个�
 common:
   seed: 42
   device: cpu
+  time_step: 5                  # 仿真时间步长（秒）：2600s 场景 ÷ 5 = 520 步/局
 
 # ==========================================
 qmix:
   # 1. 强化学习控制参数
-  max_episode_steps: 600             
+  max_episode_steps: 520
   learning_rate: 0.0005      # 针对 200 智能体稍微放大
-  gamma: 0.99                
+  gamma: 0.995                # 影响 γ（折扣因子）控制未来奖励打多大折扣，直接出现在 TD target 里 - γ 越大 → 越"远视"，未来奖励几乎和当下等价；γ 越小 → 越"近视"，只认眼前。      
+  #  target = reward_now + γ · (1 - terminated) · Q_target(下一状态)
   batch_size: 32             
   buffer_size: 2000          
-  update_target_params: 200  
+  update_target_params: 200  #每 update_target_params 步，把 target 网络整表复制成 eval 网络。target 一跳，TD target r + γ·Q_targ 就跳，loss 就跟着跳一次。这不是损失函数写错了，是算法设计如此。
   grad_norm_clip: 10.0       
   
   # 2. 探索率控制
   epsilon_start: 1.0         
-  epsilon_finish: 0.05       
-  epsilon_anneal_time: 100000
+  epsilon_finish: 0.1       
+  epsilon_anneal_time: 500000
   optimizer: "RMS"           
   
   # 3. 网络结构参数
@@ -66,18 +68,18 @@ train:
   rl_num_workers: 32              # RL 并行环境采样 worker 数（>1 启用多进程 rollout；按机器 CPU 核数调，可被环境变量 NUM_ENV_WORKERS 覆盖）
   utd_ratio: 1                   # UTD 比：每新采 1 局做几次梯度更新（replay 复用，喂饱 GPU；1=原行为，4~8 常用）
   il_num_workers: 16              # IL 数据加载并行进程数（DataLoader num_workers；独立于 RL 的 env 采样 num_workers；Windows 开发机报错可设 0）
+  expert_csv_workers: 8           # IL 专家数据生成多进程数（按时间步切分并行；1=串行原行为，0=自动 min(cpu,8)）
   load_dir: "./load_dir"
   epochs: 50                     # IL 默认训练轮数
   save_frequency: 50             # 保存频率
   result_dir: ./results
   model_dir: ./models
-  flag_dir: ./flags
 
   # 两阶段冻结训练（统一骨架 225 agent）
   #   phase1_episodes = -1 : LD训练 max_episodes局，WX 不训练
   #   phase1_episodes =  0 : ld wx 一起训练，各max_episodes局
   #   phase1_episodes =  N : 第 N 局起自动切 phase2 wx 一起训练。 ld训练max_episode  wx训练max-episode +1 
-  phase1_episodes: 0
+  phase1_episodes: 500
   wx_epsilon: 0.3                # phase2 卫星独立探索率（WX 从零学，给足探索）
 # ┌──────┬──────────────┬──────────────────────┐
 # │ 设置  │ LD 训练局数  │     WX 训练局数       │
@@ -91,13 +93,21 @@ train:
 # ==========================================
 eval:
   max_episodes: 1
+  max_episode_steps: 520          # 推理一回合最大步数（显式声明，与 qmix 训练段一致）
   load_dir: "./load_dir"
   epsilon: 0.0
   eval_records_dir: "./eval_records"
 
 # ==========================================
+# 基准推演评估（/baseline_eval/start：只生成专家预案基线，不加载模型权重、不跑 episodes）
+baseline:
+  eval_records_dir: "./eval_records"
+
+# ==========================================
 # 基础设施参数（平台对接 / ZMQ / 网络）
 infra:
+  # 任务控制标志位目录（由 TaskController 统一管理，按 task_id 分目录）:
+  #   {PROJECT_ROOT}/tmp_flag/{task_id}/pause.flag | terminate.flag | speed.flag
   PLATFORM_BASE_URL: http://7.81.21.52:18029
   zmq_server_ip: 7.81.21.51
   zmq_pub_port: 5558
@@ -105,3 +115,5 @@ infra:
   situation_base_interval: 0.5    # 1× 倍速时的帧间隔（秒），越大推送越慢
   situation_speed_refresh: 0.5    # 前端倍速参数重读 TTL（秒）访问临时文件中的speed
   situation_warn_episodes: 200    # 发送池高水位告警阈值（局），超过告警一次
+  situation_pool_max: 300         # 发送池容量上限（局），0=无上限；满则丢最旧防内存爆（需 > warn阈值，先告警后丢）
+  clean_scene: true               # 任务结束后是否清理场景/预案文件（false=保留供排查）

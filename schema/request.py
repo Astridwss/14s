@@ -75,9 +75,9 @@ class ILTrainRequest(BaseModel):
     load_dir: str = Field(..., description="选择要继续训练的权重路径")
     scene_url: str = Field(..., description="平台下发的场景文件本地路径")
     algorithm: str = Field(
-        default="drqn_il",
-        description="IL 训练固定走 DRQN 预训练，必须为 'drqn_il' 才能命中 algo.yaml 的 drqn_il 段"
-                    "（专属学习率 0.001 / seq_len 50 / 数据增强等超参）；传 qmix/DRQN 等其它值会"
+        default="drqn",
+        description="IL 训练固定走 DRQN 预训练，必须为 'drqn' 才能命中 algo.yaml 的 drqn 段"
+                    "（专属学习率 0.001 / seq_len 50 / 数据增强等超参）；传 qmix 等其它值会"
                     "静默回退到 qmix 段，导致学习率与 seq_len 用错，影响 IL 表征与 RL 热启动质量",
     )
     epochs: int = Field(..., description="训练总轮数")

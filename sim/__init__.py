@@ -6,7 +6,8 @@ from .datastruct import (
     SensorInfo, 
     SystemTrackBase, 
     AgentActionCommand,
-    AgentObservation
+    AgentObservation,
+    BattleScene
 )
 
 __all__=[
@@ -17,5 +18,6 @@ __all__=[
     'AgentActionCommand', 
     'AgentObservation', 
     'TwoDimensionMinMax',
-    'PlanFileProcess'
+    'PlanFileProcess',
+    'BattleScene'
     ]

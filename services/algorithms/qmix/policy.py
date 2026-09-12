@@ -1,5 +1,6 @@
 import glob
 import os
+import re
 from typing import List
 
 import torch
@@ -15,6 +16,19 @@ from services.scene.state.group_slicer import (
 )
 from utils.weight_naming import prefix_from_conf, weight_file_name
 from services.scene.scene_constants import LD_CAPACITY
+
+
+_GROUPSIZE_RE = re.compile(r"groupsize\d+")
+
+
+def _strip_groupsize(name: str) -> str:
+    """把权重文件名中的 groupsizeN 归一化为 groupsize，供 drqn 权重匹配忽略分组段。
+
+    DRQN 主干（fc1/layer_norm/rnn）只由实体数（LD/WX/TARGET）决定，与 group_size
+    无关；IL 训练无分组概念、权重前缀恒 groupsize0，RL(H-QMIX) 为 groupsize{N}，
+    按完整前缀比较会永远失配、退化成取第一个，故匹配 drqn 权重时忽略该段。
+    """
+    return _GROUPSIZE_RE.sub("groupsize", name)
 
 
 # ============================================================
@@ -250,10 +264,13 @@ class _BasePolicy:
         ))
 
     def _locate_drqn_weight(self, load_dir):
-        """定位 DRQN 权重文件，优先取与当前场景前缀一致的那份。
+        """定位 DRQN 权重文件，优先取与当前场景（实体数）一致的那份。
 
         权重文件名带「实体数 + 分组数」前缀，同一目录可能存在多个场景的权重，
         盲取第一个会静默加载错场景的权重，故优先精确匹配。
+
+        匹配时忽略 groupsize 段（见 _strip_groupsize）：DRQN 主干只由实体数决定，
+        IL 权重前缀恒 groupsize0、RL(H-QMIX) 为 groupsize{N}，忽略后即可精确命中。
         """
         matches = glob.glob(os.path.join(load_dir, '*_drqn.pkl'))
         if not matches:
@@ -261,9 +278,9 @@ class _BasePolicy:
                 f"[WarmStart] 未找到 DRQN 权重 (*_drqn.pkl): {load_dir}"
             )
 
-        expected = weight_file_name(self.weight_prefix, 'drqn')
+        expected = _strip_groupsize(weight_file_name(self.weight_prefix, 'drqn'))
         for path in matches:
-            if os.path.basename(path) == expected:
+            if _strip_groupsize(os.path.basename(path)) == expected:
                 return path
 
         if len(matches) > 1:

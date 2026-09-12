@@ -17,3 +17,4 @@ scenarios/
 static/
 .diff_backup/
 worklog_*.md
+tmp_flag/

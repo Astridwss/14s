@@ -8,6 +8,8 @@ from fastapi import BackgroundTasks
 from use_cases.config import ConfigAssembler
 from use_cases.pusher import Pusher
 from use_cases.runners import RLTrainRunner, ILTrainRunner, EvalRunner, BaselineEvalRunner
+from utils.task_control import TaskController
+from utils.config_printer import print_config_params
 
 
 class TrainHandler:
@@ -33,6 +35,8 @@ class TrainHandler:
 
         # ---- 一次性装配 ----
         self.conf = ConfigAssembler(self._task_id, request, mode).build()
+        # 打印 RL/IL 训练、RL 推理实际使用的参数及值（核对接口传参与最终生效值）
+        print_config_params(self.conf)
         self.push = Pusher(
             task_id=self._task_id, base_url=self.conf.PLATFORM_BASE_URL
         )
@@ -83,8 +87,8 @@ class TrainHandler:
                 "message": f"推演任务失败: {str(e)}",
                 "data": {"taskId": self._task_id, "status": "failed"},
             }
-        finally:
-            self._cleanup_scene()
+        # finally:
+            # self._cleanup_scene()
 
     def run_baseline_eval(self) -> dict:
         """基准推演评估（同步返回结果）—— 只生成专家预案基线，不加载模型权重。"""
@@ -110,8 +114,8 @@ class TrainHandler:
                 "message": f"基准推演任务失败: {str(e)}",
                 "data": {"taskId": self._task_id, "status": "failed"},
             }
-        finally:
-            self._cleanup_scene()
+        # finally:
+        #     self._cleanup_scene()
 
     # ============================================================
     # 私有
@@ -145,12 +149,24 @@ class TrainHandler:
             self._cleanup_scene()
 
     def _cleanup_scene(self) -> None:
-        """任务结束后清理场景文件（幂等，由本服务统一回收，避免 task 目录堆积）。
+        """任务结束后清理任务产物（控制标志位 + 场景文件），幂等，由本服务统一回收。
 
-        先删 conf.local_scene_path 指向的文件，再尝试删已空的父目录
-        （os.rmdir 仅对空目录生效，非空或不存在会抛 OSError，静默忽略）。
+        1. 清理 tmp_flag/{task_id}/ 下的 pause/terminate/speed 标志文件（及空目录），
+           避免控制标志位随任务堆积。
+        2. 先删 conf.local_scene_path 指向的文件，再尝试删已空的父目录
+           （os.rmdir 仅对空目录生效，非空或不存在会抛 OSError，静默忽略）。
         失败不抛出，避免影响任务主流程。
+
+        场景文件删除受 algo.yaml 的 clean_scene 开关控制：置 false 时保留场景文件与
+        父目录供排查（标志位清理不受影响，始终执行，避免残留控制标志影响后续任务）。
         """
+        TaskController.clear(self._task_id)
+
+        # 配置开关：clean_scene=false 时保留场景/预案文件（排查用）
+        if not getattr(self.conf, "clean_scene", True):
+            print("[TrainHandler] clean_scene=false，跳过场景文件清理（保留供排查）")
+            return
+
         scene_path = getattr(self.conf, "local_scene_path", "")
         if not scene_path or not os.path.exists(scene_path):
             return

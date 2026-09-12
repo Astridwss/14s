@@ -1,62 +1,12 @@
-"""
-态势轨迹池 + 独立发送线程。
+"""态势发送线程 —— 从池取局，按前端倍速逐帧 ZMQ push。"""
 
-采集（worker/主进程）与下发（前端）解耦：
-  - 生产者把「一整局态势轨迹」（list[序列化后的 proto 字节]）原子入池
-  - 独立发送线程按前端倍速参数从池中取局、逐帧 ZMQ push
-  - 池子是无上限 FIFO（不丢最旧），水位由消费速度(倍速)自然调节：
-    消费快 → 池子清空；消费慢 → 池子上涨（附高水位告警，不丢数据）
-
-前端倍速参数走控制通道（API/routers/control.py → TaskController.set_speed），
-落盘到 temp_flags/{task_id}_speed.flag，发送线程按 TTL 定期重读，即时生效。
-"""
 import math
 import queue
 import threading
 import time
-from dataclasses import dataclass, field
-from typing import List
 
 from utils.task_control import TaskController
-
-
-@dataclass
-class SituationTrajectory:
-    """一整局态势轨迹：episode_idx + 按 step 顺序的序列化帧字节。
-
-    每帧字节已由 build_situation_frame 序列化好并烘焙了 EpisodeIdx/StepIdx，
-    发送线程只负责按序 send，不再组装。
-    """
-    episode_idx: int
-    frames: List[bytes] = field(default_factory=list)
-
-
-class SituationPool:
-    """无上限线程安全 FIFO 池（queue.Queue 封装），附高水位告警。"""
-
-    DRAIN = object()  # 哨兵：发送线程收到后发完现有数据并退出
-
-    def __init__(self, warn_episodes: int = 200):
-        self._q = queue.Queue()
-        self._warn_episodes = warn_episodes
-        self._warned = False
-
-    def put(self, traj: SituationTrajectory) -> None:
-        self._q.put(traj)
-        n = self._q.qsize()
-        if n >= self._warn_episodes and not self._warned:
-            print(f"[SituationPool] 态势轨迹池水位 {n} 局已达阈值 {self._warn_episodes}，"
-                  f"前端消费落后于采集，建议调大倍速或检查前端连接")
-            self._warned = True
-        elif n < self._warn_episodes // 2:
-            self._warned = False
-
-    def get(self, timeout=None):
-        """阻塞取一局（或哨兵 DRAIN）；传 timeout（秒）时超时抛 queue.Empty。"""
-        return self._q.get(timeout=timeout)
-
-    def qsize(self) -> int:
-        return self._q.qsize()
+from services.zmq.situation_pool import SituationPool, SituationTrajectory
 
 
 class SituationSender(threading.Thread):
@@ -116,11 +66,11 @@ class SituationSender(threading.Thread):
                 try:
                     item = self._pool.get(timeout=5.0)
                 except queue.Empty:
-                    # 池空 5s：周期性提示（30s 一次）。长期池空 = 生产跟不上消费 = ②，
+                    # 池空 5s：周期性提示（30s 一次）。长期池空 = 生产跟不上消费 = [2]，
                     # 此时 speed 无效（发送线程无数据可发）。
                     now = time.monotonic()
                     if now - last_empty_log >= 30.0:
-                        print("[SituationSender] 池空：持续无局可发（长期如此=②生产跟不上，调 speed 无效）")
+                        print("[SituationSender] 池空：持续无局可发（长期如此=[2]生产跟不上，调 speed 无效）")
                         last_empty_log = now
                     continue
                 if item is SituationPool.DRAIN:
@@ -138,6 +88,7 @@ class SituationSender(threading.Thread):
         for payload in traj.frames:
             if self._stop_event.is_set():
                 return
+
             self._publisher.send_payload(payload)
             speed = self._current_speed()
             time.sleep(self._base_interval / max(speed, 1e-3))

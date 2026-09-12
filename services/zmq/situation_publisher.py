@@ -1,14 +1,8 @@
-"""
-ZMQ 态势推送 —— 训练过程中向消息总线推送态势帧数据。
+"""ZMQ 推送 —— 通信层 + 串行逐帧推送 + 服务入口。
 
-提供的类:
-    SituationPublisher          — ZMQ 通信层：封装 Proto 协议并推送态势帧
-    SituationCollector          — 态势采集 hook：只采集不发送，攒成一整局轨迹（并行模式用）
-    ZMQStepHook                 — step 回调适配器：串行模式下逐帧推送（按 min_interval 降频）
-    TrainingSituationPushService — 训练态势推送服务：封装构建、调度、推送、资源释放
-
-并行模式的推送路径已改为「采集 → 入池 → 独立发送线程」（见 services/zmq/trajectory_pool.py），
-此处提供纯函数 build_situation_frame 供采集器与发送端共用，避免重复组装。
+SituationPublisher 是纯 ZMQ 通信层（socket 封装，串行/并行共用），
+ZMQStepHook 把 publisher 适配为串行模式的 step hook（逐帧推送，不经池），
+TrainingSituationPushService 是服务入口（from_conf 建 publisher，get_step_hooks 产 hook）。
 """
 
 import time
@@ -16,95 +10,8 @@ from typing import Optional
 
 import zmq
 
-from services.zmq.proto import ProtoStruct_pb2
+from services.zmq.situation_collector import build_situation_frame, _extract_frame_inputs
 
-
-def _safe_extract_id(id_str) -> int:
-    """安全地从字符串中提取纯数字 ID，适应 '1' 或 'R01' 等格式。"""
-    digits = ''.join(filter(str.isdigit, str(id_str)))
-    return int(digits) if digits else 0
-
-
-def build_situation_frame(
-    current_time: float,
-    data_type: int,
-    episode_idx: int,
-    step_idx: int,
-    raw_obs,
-    valid_cmds,
-) -> bytes:
-    """组装并序列化一帧态势 proto（纯函数，无网络 I/O）。
-
-    供 SituationPublisher.push_frame（串行发送）、SituationCollector（并行采集入池）共用。
-    """
-    msg = ProtoStruct_pb2.PR_I_RL_TRAINING_SITUATION_TO_FRONT()
-    msg.CurrentTime = float(current_time)
-    msg.DataType = int(data_type)
-    msg.EpisodeIdx = int(episode_idx)
-    msg.StepIdx = int(step_idx)
-    msg.PubCtrl.MsgHeader.MsgType = 9290
-
-    # 1. 红方装备位置
-    if hasattr(raw_obs, 'dict_equip_state') and raw_obs.dict_equip_state:
-        for eid, equip_state in raw_obs.dict_equip_state.items():
-            equip = msg.EquipPos.add()
-            equip.EquipID = _safe_extract_id(equip_state.str_equip_id)
-            equip.EquipType = equip_state.type
-            equip.Time = msg.CurrentTime
-            equip.GeoPos.X = float(equip_state.longitude)
-            equip.GeoPos.Y = float(equip_state.latitude)
-            equip.GeoPos.Z = float(equip_state.altitude)
-
-    # 2. 蓝方目标位置
-    if hasattr(raw_obs, 'dict_system_track') and raw_obs.dict_system_track:
-        for tid, track_base in raw_obs.dict_system_track.items():
-            t_pos = msg.TargetPos.add()
-            t_pos.TargetID = _safe_extract_id(track_base.str_system_track_no)
-            t_pos.Time = msg.CurrentTime
-            t_pos.GeoPos.X = float(track_base.longitude)
-            t_pos.GeoPos.Y = float(track_base.latitude)
-            t_pos.GeoPos.Z = float(track_base.altitude)
-
-    # 3. 探测/锁定关系
-    if valid_cmds:
-        for cmd in valid_cmds:
-            if cmd.str_target_id and cmd.str_target_id not in ("", "0"):
-                det = msg.Detection.add()
-                det.EquipID = _safe_extract_id(cmd.str_equip_id)
-                det.TargetID = _safe_extract_id(cmd.str_target_id)
-
-    return msg.SerializeToString()
-
-
-def _extract_frame_inputs(step_count, terminated, truncated, next_info):
-    """从 next_info 提取一帧态势所需输入，raw_obs 缺失时返回 None。
-
-    返回 (raw_obs, valid_cmds, action_time, data_type)。
-    """
-    raw_obs = next_info.get('raw_obs')
-    if raw_obs is None:
-        return None
-
-    all_cmds = next_info.get('agent_actions_list', [])
-    valid_cmds = [
-        cmd for cmd in all_cmds
-        if getattr(cmd, 'str_target_id', "") not in ("", "0")
-    ]
-    action_time = float(next_info.get('action_time', 0.0))
-
-    if step_count == 0:
-        data_type = 1   # 第一帧
-    elif terminated or truncated:
-        data_type = 2   # 最后一帧
-    else:
-        data_type = 0   # 中间过程帧
-
-    return raw_obs, valid_cmds, action_time, data_type
-
-
-# ============================================================
-# SituationPublisher —— ZMQ 通信层
-# ============================================================
 
 class SituationPublisher:
     """ZMQ 态势数据推送器 —— 纯通信层，不关心训练逻辑。
@@ -126,7 +33,7 @@ class SituationPublisher:
         self.socket.setsockopt(zmq.LINGER, 0)
         self.socket.connect(connect_addr)
         self._drop_logged = False
-        # 丢帧统计（③ 诊断）：累计丢帧 + 5s 窗口丢帧数，周期性汇总打印
+        # 丢帧统计（[3] 诊断）：累计丢帧 + 5s 窗口丢帧数，周期性汇总打印
         self._drop_count = 0
         self._drop_since_report = 0
         self._last_drop_report = 0.0
@@ -141,6 +48,7 @@ class SituationPublisher:
         data_type: int = 0,
         episode_idx: int = 0,
         step_idx: int = 0,
+        satellite_fov=None,
     ):
         """组装 Proto 并推送一帧态势数据（串行模式逐帧推送用）。
 
@@ -156,11 +64,12 @@ class SituationPublisher:
             current_time=current_time, data_type=data_type,
             episode_idx=episode_idx, step_idx=step_idx,
             raw_obs=raw_obs, valid_cmds=valid_cmds,
+            satellite_fov=satellite_fov,
         )
         self.send_payload(payload)
 
     def _record_drop(self):
-        """丢帧计数 + 周期性告警（③ 诊断：持续丢帧 = 中间件消费跟不上）。"""
+        """丢帧计数 + 周期性告警（[3] 诊断：持续丢帧 = 中间件消费跟不上）。"""
         self._drop_count += 1
         self._drop_since_report += 1
         now = time.monotonic()
@@ -170,7 +79,7 @@ class SituationPublisher:
             self._last_drop_report = now
         elif now - self._last_drop_report >= 5.0:
             print(f"[ZMQ Publisher] 持续丢帧：近 5 秒丢 {self._drop_since_report} 帧"
-                  f"（累计 {self._drop_count}）→ 中间件消费跟不上=③")
+                  f"（累计 {self._drop_count}）→ 中间件消费跟不上=[3]")
             self._drop_since_report = 0
             self._last_drop_report = now
 
@@ -202,40 +111,6 @@ class SituationPublisher:
         self.context.term()
 
 
-# ============================================================
-# SituationCollector —— 并行模式：只采集不发送
-# ============================================================
-
-class SituationCollector:
-    """态势采集 hook —— 每步把序列化帧攒成一整局轨迹，不直接发送。
-
-    并行模式下替代 ZMQStepHook：worker 侧不再在 step 循环里做 ZMQ 网络 I/O，
-    而是把整局轨迹回主进程入池，由 SituationSender 线程按前端倍速逐帧推送。
-    """
-
-    def __init__(self, episode_idx: int):
-        self.episode_idx = episode_idx
-        self.frames: list = []
-
-    def __call__(self, step_count: int, terminated: bool, truncated: bool, next_info: dict):
-        inputs = _extract_frame_inputs(step_count, terminated, truncated, next_info)
-        if inputs is None:
-            print(f"[ZMQ Debug] 第 {step_count} 步没有拿到 raw_obs，跳过采集")
-            return
-        raw_obs, valid_cmds, action_time, data_type = inputs
-
-        payload = build_situation_frame(
-            current_time=action_time, data_type=data_type,
-            episode_idx=self.episode_idx, step_idx=step_count,
-            raw_obs=raw_obs, valid_cmds=valid_cmds,
-        )
-        self.frames.append(payload)
-
-
-# ============================================================
-# ZMQStepHook —— 串行模式：逐帧推送
-# ============================================================
-
 class ZMQStepHook:
     """Rollout 步进事件的 ZMQ 回调钩子（串行模式）。
 
@@ -249,7 +124,8 @@ class ZMQStepHook:
         self.task_id = task_id
         self.episode_idx = episode_idx
         self.min_interval = min_interval
-        self._last_push = -float("inf") ## 初始 -inf，保证首帧必推
+        self._last_push = -float("inf")  # 初始 -inf，保证首帧必推
+        
 
     def __call__(self, step_count: int, terminated: bool, truncated: bool, next_info: dict):
         """当环境执行完 step 后，触发此调用。"""
@@ -257,7 +133,7 @@ class ZMQStepHook:
         if inputs is None:
             print(f"[ZMQ Debug] 第 {step_count} 步没有拿到 raw_obs，跳过推送")
             return
-        raw_obs, valid_cmds, action_time, data_type = inputs
+        raw_obs, valid_cmds, action_time, data_type, satellite_fov = inputs
 
         # 时间节流：首帧/末帧必推，中间帧按 min_interval 降频（跳过而非 sleep，不阻塞训练）
         if data_type == 0:
@@ -274,12 +150,9 @@ class ZMQStepHook:
             data_type=data_type,
             episode_idx=self.episode_idx,
             step_idx=step_count,
+            satellite_fov=satellite_fov,
         )
 
-
-# ============================================================
-# TrainingSituationPushService —— 训练态势推送服务
-# ============================================================
 
 class TrainingSituationPushService:
     """训练态势推送服务 —— 封装 ZMQ 推送的构建、调度、推送、资源释放。
@@ -353,6 +226,7 @@ class TrainingSituationPushService:
         data_type: int = 0,
         episode_idx: int = 0,
         step_idx: int = 0,
+        satellite_fov=None,
     ):
         """直接推送一帧态势数据，不依赖 RolloutWorker 的 step_hook 机制。"""
         self._publisher.push_frame(
@@ -363,6 +237,7 @@ class TrainingSituationPushService:
             data_type=data_type,
             episode_idx=episode_idx,
             step_idx=step_idx,
+            satellite_fov=satellite_fov,
         )
 
     # ---- 资源管理 ----

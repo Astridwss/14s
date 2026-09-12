@@ -19,7 +19,7 @@ if str(_proj_root) not in sys.path:
     sys.path.insert(0, str(_proj_root))
 
 from use_cases.runners.base_runner import BaseRunner
-from use_cases.config.config_types import EnvConfig, AlgorithmConfig
+from use_cases.config.config_types import EnvConfig, AlgorithmConfig, InfraConfig
 from services.scene.env_wrapper import GroupedEnvWrapper
 from services.algorithms.qmix.agent import Agents
 from services.sample.rollout import RolloutWorker
@@ -29,7 +29,10 @@ from services.evaluation import (
 )
 from sim import PlanFileProcess
 from utils.weight_naming import build_weight_prefix
-from services.zmq.zmq_push import TrainingSituationPushService
+from services.zmq.situation_publisher import TrainingSituationPushService
+from services.zmq.situation_collector import SituationCollector
+from services.zmq.situation_pool import SituationPool, SituationTrajectory
+from services.zmq.situation_sender import SituationSender
 from utils.situation_logger import SituationLogHook
 
 
@@ -136,6 +139,29 @@ class EvalRunner(BaseRunner):
         # ---- ZMQ 态势推送 ----
         self._zmq = TrainingSituationPushService.from_conf(conf)
 
+        # ---- 态势轨迹池 + 独立发送线程（支持前端倍速，与 RL 并行模式同构） ----
+        self._situation_pool = None
+        self._situation_sender = None
+        
+        # push_interval>0 才非 None
+        if self._zmq is not None:
+            ic = getattr(conf, 'infra', None) or InfraConfig.from_config(conf)
+            #建池
+            self._situation_pool = SituationPool(
+                warn_episodes=ic.situation_warn_episodes,
+                max_episodes=ic.situation_pool_max,
+            )
+            #独立发送线程
+            self._situation_sender = SituationSender(
+                publisher=self._zmq.publisher,
+                task_id=getattr(conf, 'task_id', 'UNKNOWN'),
+                pool=self._situation_pool,
+                base_interval=ic.situation_base_interval,
+                speed_refresh=ic.situation_speed_refresh,
+            )
+            self._situation_sender.start()
+            print("[EvalRunner] 态势轨迹池 + 独立发送线程已启动（前端倍速参数生效中）")
+
         # ---- 态势日志 hook ----
         self._situation_log_hook = SituationLogHook(
             radar_keys=ec.agent_keys,
@@ -191,17 +217,60 @@ class EvalRunner(BaseRunner):
     # ============================================================
 
     def run(self):
-        """推演主循环。"""
+        """推演入口：态势推送走轨迹池（支持前端倍速），否则逐帧串行。"""
+        if self._situation_pool is not None:
+            return self._run_pooled()
+        return self._run_serial()
+
+    def _run_pooled(self):
+        """轨迹池推演：采集整局态势 → 入池 → 发送线程按前端倍速逐帧推送。"""
         all_eval_data = {}
-        task_id = getattr(self.conf, "task_id", "UNKNOW")
+        start_time = time.time()
+        print(f"\n[EvalRunner] 开始推演评估，共计 {self.conf.max_episodes} 局...")
+
+        try:
+            for episode_idx in range(1, self.conf.max_episodes + 1):
+                if not self._should_continue(episode_idx):
+                    break
+
+                # 组装 hooks：态势日志 + 轨迹采集（仅命中推送间隔或末局时采集入池）
+                hooks = [self._situation_log_hook]
+                collector = None
+                if self._should_push_episode(episode_idx):
+                    collector = SituationCollector(episode_idx)
+                    hooks.append(collector)
+
+                ep_reward, step_count, eval_records = self.rollout_worker.generate_eval_episode(
+                    step_hooks=hooks,
+                )
+                print(f"[推演 {episode_idx}/{self.conf.max_episodes}] ", f"reward={ep_reward:.2f}, steps={step_count}")
+
+                # 将采集到的态势数据放入轨迹池中
+                if collector is not None and collector.frames:
+                    self._situation_pool.put(
+                        SituationTrajectory(episode_idx=episode_idx, frames=collector.frames)
+                    )
+
+                all_eval_data[f"episode_{episode_idx}"] = eval_records
+        finally:
+            # 发完池中剩余轨迹再退出（前端消费过慢由 finish 超时兜底）
+            if self._situation_sender is not None:
+                self._situation_sender.finish()
+                self._situation_sender = None
+
+        return self._finalize(all_eval_data, start_time)
+
+    def _run_serial(self):
+        """串行推演：逐 step 推送态势（原行为；推送关闭时亦走此路，仅产出评估记录）。"""
+        all_eval_data = {}
         start_time = time.time()
         print(f"\n[EvalRunner] 开始推演评估，共计 {self.conf.max_episodes} 局...")
 
         for episode_idx in range(1, self.conf.max_episodes + 1):
             if not self._should_continue(episode_idx):
                 break
-            
-            # 组装 hooks：态势日志 + ZMQ 推送（按推送间隔调度）
+
+            # 组装 hooks：态势日志 + ZMQ 逐帧推送（按推送间隔调度）
             hooks = [self._situation_log_hook]
             if self._zmq:
                 hooks.extend(self._zmq.get_step_hooks(episode_idx))
@@ -213,9 +282,21 @@ class EvalRunner(BaseRunner):
 
             all_eval_data[f"episode_{episode_idx}"] = eval_records
 
+        return self._finalize(all_eval_data, start_time)
+        
+    
+    def _should_push_episode(self, episode_idx: int) -> bool:
+        """是否应推送该局态势（命中推送间隔或末局）。"""
+        push_interval = getattr(self.conf, 'push_interval', 0)
+        if push_interval <= 0:
+            return False
+        return episode_idx % push_interval == 0 or episode_idx == self.conf.max_episodes
+
+    def _finalize(self, all_eval_data, start_time):
+        """汇总评估数据，生成平台格式产物并返回响应字段。"""
         end_time = time.time()
         cost_seconds = end_time - start_time
-        
+
         print(f"[EvalRunner] 智能体输出信息处理对象已将输出信息转换为装备规划动作\n")
         print(f"[EvalRunner] 推演评估结束, 总耗时: {cost_seconds:.2f} 秒\n")
 
@@ -223,7 +304,6 @@ class EvalRunner(BaseRunner):
         self._save_dataclass_records_to_json(all_eval_data)
 
         eval_fields = self._build_eval_fields(metric_abs_path, start_time, end_time, cost_seconds)
-        
 
         return {
             "timeSeriesFile": result_abs_path,

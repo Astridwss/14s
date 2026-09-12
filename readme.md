@@ -15,7 +15,7 @@ http://127.0.0.1:8000/map?task_id=任务ID
 
 # 测试强化学习训练启动
 
-curl -X POST http://7.81.21.52:8066/api/v1/train/rl \
+curl -X POST http://127.0.0.1:8000/api/v1/train/rl \
 -H "Content-Type: application/json" \
 -d '{
 		"max_episodes": 3000,
@@ -23,9 +23,9 @@ curl -X POST http://7.81.21.52:8066/api/v1/train/rl \
 		"group_size": 10,
 		"algorithm": "qmix",
 		"task_id": "rl_test_828_1",
-		"plan_id": "1081",
+		"plan_id": "867",
 		"load_dir": "",
-		"scene_url": "/home/kylin/14229/back/20260906/code-0906/f18d2315-7d7d-4ad6-b00f-85aaaa68074f.json",
+		"scene_url": "C:\webace_2026\14s\code\webace-3\scene.json",
 		"push_interval": 1,
 		"rl_num_workers": 16,
 		"hyperparameters": {

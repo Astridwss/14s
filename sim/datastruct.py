@@ -58,6 +58,7 @@ class SatelliteInfo:
     ele_min: float = -10.0                                                                      # 探测仰角下界，单位：deg
     ele_max: float = 10.0                                                                       # 探测仰角上界，单位：deg
     track_num_max: int = 1                                                                      # 最大跟踪容量
+    camera_pointing_max: float = 30.0                                                           # 相机最大指向角，单位：deg
 
 
 # 作战场景

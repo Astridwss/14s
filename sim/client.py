@@ -9,6 +9,7 @@ from .datastruct import (
     AgentObservation, AgentActionCommand
 )
 from .plan_file_process import PlanFileProcess
+from .satellite_fov_calculation import SatelliteFovCalculation
 
 class TrainingEnv:
     """
@@ -47,6 +48,16 @@ class TrainingEnv:
     def dict_radar_info(self):
         """雷达信息字典，供 RadarGrouper 聚类使用。"""
         return self._dict_radar_info
+    
+    # 20260912 TaoXL add
+    @property
+    def dict_satellite_info(self):
+        return self._dict_satellite_info
+    
+    @property
+    def dict_target_info(self):
+        return self._dict_target_info
+    # 20260912 TaoXL add end
 
     def reset(self) -> AgentObservation:
         """环境重置"""
@@ -170,28 +181,39 @@ class TrainingEnv:
                         equip_info.range_min <= r / 1000.0 <= equip_info.range_max):
                         det_res.detectable_flag = True
                 elif equip_info.type == 2:
+                    camera_pointing_max = 0.0
+                    if equip_id in self._dict_satellite_info:
+                        camera_pointing_max = self._dict_satellite_info.get(equip_id).camera_pointing_max
+
                     sat_xyz = pm.geodetic2ecef(equip_info.latitude, equip_info.longitude, equip_info.altitude)
                     target_xyz = pm.geodetic2ecef(system_track.latitude, system_track.longitude, system_track.altitude)
                     earth_center = np.array([0.0, 0.0, 0.0])
                     vec_cam = earth_center - sat_xyz
                     vec_target = np.array([target_xyz[0], target_xyz[1], target_xyz[2]]) - np.array([sat_xyz[0], sat_xyz[1], sat_xyz[2]])
 
-                    norm_cam = np.linalg.norm(vec_cam)
-                    norm_target = np.linalg.norm(vec_target)
-
-                    if norm_cam == 0 or norm_target == 0:
+                    fov_calc = SatelliteFovCalculation()
+                    earth_occluded_flag = fov_calc.is_earth_occluded(np.array([sat_xyz[0], sat_xyz[1], sat_xyz[2]]),
+                                                                     np.array(
+                                                                         [target_xyz[0], target_xyz[1], target_xyz[2]]))
+                    if earth_occluded_flag:
                         det_res.detectable_flag = False
                     else:
-                        dot_product = np.dot(vec_cam, vec_target)
-                        cos_theta = dot_product / (norm_cam * norm_target)
-                        cos_theta = np.clip(cos_theta, -1.0, 1.0)
-                        theta_radians = np.arccos(cos_theta)
-                        theta_degrees = np.degrees(theta_radians)
+                        norm_cam = np.linalg.norm(vec_cam)
+                        norm_target = np.linalg.norm(vec_target)
 
-                        if theta_degrees < equip_info.azi_max:
-                            det_res.detectable_flag = True
-                        else:
+                        if norm_cam == 0 or norm_target == 0:
                             det_res.detectable_flag = False
+                        else:
+                            dot_product = np.dot(vec_cam, vec_target)
+                            cos_theta = dot_product / (norm_cam * norm_target)
+                            cos_theta = np.clip(cos_theta, -1.0, 1.0)
+                            theta_radians = np.arccos(cos_theta)
+                            theta_degrees = np.degrees(theta_radians)
+
+                            if abs(theta_degrees) < equip_info.azi_max + camera_pointing_max:
+                                det_res.detectable_flag = True
+                            else:
+                                det_res.detectable_flag = False
                 else:
                     continue
                 

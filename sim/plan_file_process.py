@@ -1,13 +1,16 @@
 # 预案文件处理类
 # sim/plan_file_process.py 的头部导入区域
 import json
+import copy
 from typing import List, Dict
+import numpy as np
 from .datastruct import (
     PlanFileInfo, BattleScene, EquipmentDetectionTime, PlanResult,
     AgentActionCommand, TargetTrajPtInfo, TargetInfo, SensorInfo, SatelliteInfo,
 )
 from .two_dim_coordinate import TwoDimensionMinMax
 from .ganttchart import GanttChart, OverlappingNumberRequirement
+from .satellite_fov_calculation import SatelliteFovCalculation
 
 
 class PlanFileProcess:
@@ -82,10 +85,47 @@ class PlanFileProcess:
                                 satellite_info = SatelliteInfo()
                                 satellite_info.str_satellite_id = str(dict_satellite.get('id', ''))
                                 satellite_info.str_satellite_name = dict_satellite.get('satellifeName', '')
-                                satellite_info.azi_min = -2.5
-                                satellite_info.azi_max = 2.5
-                                satellite_info.ele_min = -2.5
-                                satellite_info.ele_max = 2.5
+
+                                str_sensor_info = dict_satellite.get('sensorInfo')
+                                sensor_info_data = json.loads(str_sensor_info)
+
+                                if isinstance(sensor_info_data, dict):
+                                    lst_sensor_info = sensor_info_data.get('sensorInfo')
+
+                                    first_count_flag = True
+                                    for dict_sensor_info in lst_sensor_info:
+                                        lst_work_mode = dict_sensor_info.get('workMode')
+                                        for dict_work_mode in lst_work_mode:
+                                            sensor_azi_min = -dict_work_mode.get('workModeParameters').get(
+                                                'azimuth') / 2.0
+                                            sensor_azi_max = dict_work_mode.get('workModeParameters').get(
+                                                'azimuth') / 2.0
+                                            sensor_ele_min = -dict_work_mode.get('workModeParameters').get(
+                                                'elevation') / 2.0
+                                            sensor_ele_max = dict_work_mode.get('workModeParameters').get(
+                                                'elevation') / 2.0
+                                            sensor_pointing_max = dict_work_mode.get('workModeParameters').get(
+                                                'pointing')
+
+                                            if first_count_flag:
+                                                satellite_info.azi_min = sensor_azi_min
+                                                satellite_info.azi_max = sensor_azi_max
+                                                satellite_info.ele_min = sensor_ele_min
+                                                satellite_info.ele_max = sensor_ele_max
+                                                satellite_info.camera_pointing_max = sensor_pointing_max
+                                                first_count_flag = False
+                                            else:
+                                                if sensor_azi_min < satellite_info.azi_min:
+                                                    satellite_info.azi_min = sensor_azi_min
+                                                if sensor_azi_max > satellite_info.azi_max:
+                                                    satellite_info.azi_max = sensor_azi_max
+                                                if sensor_ele_min < satellite_info.ele_min:
+                                                    satellite_info.ele_min = sensor_ele_min
+                                                if sensor_ele_max > satellite_info.ele_max:
+                                                    satellite_info.ele_max = sensor_ele_max
+                                                if sensor_pointing_max > satellite_info.camera_pointing_max:
+                                                    satellite_info.camera_pointing_max = sensor_pointing_max
+
                                 satellite_info.track_num_max = 1
 
                                 # 20260408
@@ -206,19 +246,97 @@ class PlanFileProcess:
         plan_file_info.plan_result = self.read_plan_result_from_json(plan_id=plan_id, file_path=file_path)
         return plan_file_info
 
+
+    # 更新模型推理结果，对处于卫星视场内的目标创建AgentActionCommand
+    def update_model_inference_satellite_result(self,
+                                                dict_model_inference_result: Dict[int, List[AgentActionCommand]],
+                                                battle_scene: BattleScene) -> Dict[int, List[AgentActionCommand]]:
+        # 将卫星视场角内的目标，均添加临时的动作指令，以在下一步生成相应的探测弧段
+        dict_model_inference_result_update = copy.deepcopy(dict_model_inference_result)
+        lst_target_id = list(battle_scene.dict_target_id_info.keys())
+
+        for time, lst_model_inference_result in dict_model_inference_result_update.items():
+            lst_add_command: List[AgentActionCommand] = []
+
+            targets: List[np.ndarray] = []
+            for tgt in battle_scene.dict_target_id_info.values():
+                if time in tgt.dict_target_traj_pt_info:
+                    targets.append(np.array([tgt.dict_target_traj_pt_info.get(time).longitude,
+                                             tgt.dict_target_traj_pt_info.get(time).latitude,
+                                             tgt.dict_target_traj_pt_info.get(time).altitude]))
+
+            for model_inference_result in lst_model_inference_result:
+                str_equip_id = model_inference_result.str_equip_id
+                str_target_id = model_inference_result.str_target_id
+
+                if (str_equip_id not in battle_scene.dict_satellite_id_info) or (
+                        str_target_id not in battle_scene.dict_target_id_info):
+                    continue
+
+                sat_current_geo_pos: np.ndarray = None
+                satellite_info: SatelliteInfo = battle_scene.dict_satellite_id_info.get(str_equip_id)
+                if time in satellite_info.dict_satellite_traj_pt_info:
+                    sat_current_geo_pos = np.array([satellite_info.dict_satellite_traj_pt_info.get(time).longitude,
+                                                    satellite_info.dict_satellite_traj_pt_info.get(time).latitude,
+                                                    satellite_info.dict_satellite_traj_pt_info.get(time).altitude])
+
+                sat_last_geo_pos: np.ndarray = None
+                if time > 0 and (time - 1) in satellite_info.dict_satellite_traj_pt_info:
+                    sat_last_geo_pos = np.array([satellite_info.dict_satellite_traj_pt_info.get(time - 1).longitude,
+                                                 satellite_info.dict_satellite_traj_pt_info.get(time - 1).latitude,
+                                                 satellite_info.dict_satellite_traj_pt_info.get(time - 1).altitude])
+
+                fov_az = satellite_info.azi_max - satellite_info.azi_min
+                fov_el = satellite_info.ele_max - satellite_info.ele_min
+                max_pointing_angle = satellite_info.camera_pointing_max
+
+                center_target_geo_pos: np.ndarray = None
+                target_info: TargetInfo = battle_scene.dict_target_id_info.get(str_target_id)
+                if time in target_info.dict_target_traj_pt_info:
+                    center_target_geo_pos = np.array([target_info.dict_target_traj_pt_info.get(time).longitude,
+                                                      target_info.dict_target_traj_pt_info.get(time).latitude,
+                                                      target_info.dict_target_traj_pt_info.get(time).altitude])
+
+                fov_calc = SatelliteFovCalculation()
+                in_fov_indices: List[int] = fov_calc.find_targets_in_fov(sat_current_geo_pos=sat_current_geo_pos,
+                                                                         fov_az=fov_az,
+                                                                         fov_el=fov_el,
+                                                                         center_target_geo_pos=center_target_geo_pos,
+                                                                         max_pointing_angle=max_pointing_angle,
+                                                                         targets=targets,
+                                                                         sat_last_geo_pos=sat_last_geo_pos)
+
+                for index in in_fov_indices:
+                    str_add_target_id = lst_target_id[index]
+                    if str_add_target_id != str_target_id:
+                        add_command = AgentActionCommand(time=time, str_equip_id=str_equip_id,
+                                                         str_target_id=str_add_target_id)
+                        lst_add_command.append(add_command)
+
+            if lst_add_command:
+                lst_model_inference_result.extend(lst_add_command)
+
+        return dict_model_inference_result_update
+
+
     # =======================================================
     # 5. 推演结果生成与保存相关 (保持空壳和占位不变)
     # =======================================================
     # 将模型推理结果，转换为规划结果
     def write_model_inference_result_to_plan_result(self,
                                                     dict_model_inference_result: Dict[int, List[AgentActionCommand]],
+                                                    battle_scene: BattleScene,
                                                     time_cut: int = 20) -> PlanResult:
+        # 更新模型推理结果，对处于卫星视场内的目标创建AgentActionCommand
+        dict_model_inference_result_update = self.update_model_inference_satellite_result(dict_model_inference_result=dict_model_inference_result,
+                                                                                          battle_scene=battle_scene)
+
         plan_result = PlanResult()
 
         # print(dict_model_inference_result.keys())
 
         # dict_model_inference_result_sorted = dict(sorted(dict_model_inference_result.items()))   20260409 暂不需要再排序啦
-        for lst_model_inference_result in dict_model_inference_result.values():
+        for lst_model_inference_result in dict_model_inference_result_update.values():
             for model_inference_result in lst_model_inference_result:
                 if model_inference_result.str_equip_id not in plan_result.dict_equip_id_target_id_detection_time:
                     plan_result.dict_equip_id_target_id_detection_time[model_inference_result.str_equip_id] = {}
@@ -393,9 +511,9 @@ class PlanFileProcess:
 
     # 将模型推理结果，转换为json格式的预案文件
     def write_model_inference_result_to_json(self, dict_model_inference_result: Dict[int, List[AgentActionCommand]],
-                                             dest_path: str) -> None:
+                                             battle_scene: BattleScene, dest_path: str) -> None:
         plan_result = self.write_model_inference_result_to_plan_result(
-            dict_model_inference_result=dict_model_inference_result)
+            dict_model_inference_result=dict_model_inference_result, battle_scene=battle_scene)
         self.write_plan_result_to_json(plan_result=plan_result, dest_path=dest_path)
 
         return
@@ -405,7 +523,7 @@ class PlanFileProcess:
                                              battle_scene: BattleScene, dest_path: str) -> None:
         plan_file_process = PlanFileProcess()
         plan_result = self.write_model_inference_result_to_plan_result(
-            dict_model_inference_result=dict_model_inference_result)
+            dict_model_inference_result=dict_model_inference_result, battle_scene=battle_scene)
         self.write_plan_metric_to_json(plan_result=plan_result, battle_scene=battle_scene, dest_path=dest_path)
 
         return

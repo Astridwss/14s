@@ -31,25 +31,29 @@ class TaskController:
 
     @staticmethod
     def _flag_dir() -> str:
-        d = os.path.join(os.environ.get("PROJECT_ROOT", "."), "temp_flags")
+        """全部任务控制标志位的根目录（单一来源，ConfigAssembler 也调用此处）。"""
+        d = os.path.join(os.environ.get("PROJECT_ROOT", "."), "tmp_flag")
+        os.makedirs(d, exist_ok=True)
+        return d
+
+    @staticmethod
+    def _task_dir(task_id: str) -> str:
+        """单个任务的标志位子目录 tmp_flag/{task_id}/（每个任务一个独立目录）。"""
+        d = os.path.join(TaskController._flag_dir(), task_id)
         os.makedirs(d, exist_ok=True)
         return d
 
     @staticmethod
     def pause_path(task_id: str) -> str:
-        return os.path.join(TaskController._flag_dir(), f"{task_id}_pause.flag")
+        return os.path.join(TaskController._task_dir(task_id), "pause.flag")
 
     @staticmethod
     def terminate_path(task_id: str) -> str:
-        return os.path.join(
-            TaskController._flag_dir(), f"{task_id}_terminate.flag"
-        )
+        return os.path.join(TaskController._task_dir(task_id), "terminate.flag")
 
     @staticmethod
     def speed_path(task_id: str) -> str:
-        return os.path.join(
-            TaskController._flag_dir(), f"{task_id}_speed.flag"
-        )
+        return os.path.join(TaskController._task_dir(task_id), "speed.flag")
 
     # ============================================================
     # HTTP 控制 —— 写标志文件
@@ -90,6 +94,28 @@ class TaskController:
                 return float(f.read().strip())
         except (OSError, ValueError):
             return default
+
+    @classmethod
+    def clear(cls, task_id: str) -> None:
+        """清理任务全部控制标志位（pause/terminate/speed），任务结束后调用。
+
+        幂等：文件不存在或删除失败均静默忽略，避免影响任务主流程。
+        删除标志位后，再尝试移除已空的 per-task 目录 tmp_flag/{task_id}/。
+        """
+        for path in (cls.pause_path(task_id),
+                     cls.terminate_path(task_id),
+                     cls.speed_path(task_id)):
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except OSError:
+                pass
+
+        # 清理已空的 per-task 子目录（目录非空或不存在时静默忽略）
+        try:
+            os.rmdir(cls._task_dir(task_id))
+        except OSError:
+            pass
 
     # ============================================================
     # 运行时轮询

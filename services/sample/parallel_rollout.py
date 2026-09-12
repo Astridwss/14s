@@ -102,16 +102,27 @@ def _init_worker(conf_dict, group_assignments, worker_devices, idx_counter):
 
     # 并行模式不再在 worker 侧直接 ZMQ push：worker 只负责「采集」整局态势轨迹
     # （逐帧序列化、烘焙 EpisodeIdx/StepIdx，不发送），轨迹回主进程入池后由
-    # 独立发送线程按前端倍速推送（见 services/zmq/trajectory_pool.py）。
+    # 独立发送线程按前端倍速推送（见 services/zmq/situation_sender.py）。
     from utils.situation_logger import SituationLogHook
-    push_enabled = int(getattr(conf, 'push_interval', 0) or 0) > 0
+    # 态势采集降频：worker 只采集「命中推送间隔 / 末局」的整局轨迹，
+    # 与主进程 _should_push_episode 同口径，避免 push_interval>1 时白采大量帧。
+    _WS["push_interval"] = int(getattr(conf, 'push_interval', 0) or 0)
+    _WS["max_episodes"] = int(getattr(conf, 'max_episodes', 0) or 0)
 
     _WS["env"] = env
     _WS["agents"] = agents
     _WS["rollout"] = rollout
-    _WS["push_enabled"] = push_enabled
-    _WS["situation_hook"] = SituationLogHook(
-        radar_keys=ec.agent_keys, target_keys=ec.target_keys, log_interval=50)
+    # _WS["situation_hook"] = SituationLogHook(
+    #     radar_keys=ec.agent_keys, target_keys=ec.target_keys, log_interval=50)
+
+
+def _should_collect_episode(episode_idx: int) -> bool:
+    """worker 侧：该局是否命中推送间隔 / 末局（与主进程 _should_push_episode 同口径）。"""
+    push_interval = _WS.get("push_interval", 0)
+    max_episodes = _WS.get("max_episodes", 0)
+    if push_interval <= 0:
+        return False
+    return episode_idx % push_interval == 0 or episode_idx == max_episodes
 
 
 def _run_one_episode(task):
@@ -132,8 +143,8 @@ def _run_one_episode(task):
 
     collector = None
     hooks = []
-    if _WS.get("push_enabled"):
-        from services.zmq.zmq_push import SituationCollector
+    if _should_collect_episode(episode_idx):
+        from services.zmq.situation_collector import SituationCollector
         collector = SituationCollector(episode_idx)
         hooks.append(collector)
     if situation_hook is not None:

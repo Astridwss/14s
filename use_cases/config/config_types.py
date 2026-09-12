@@ -43,6 +43,7 @@ class EnvConfig:
     plan_id: int
     local_scene_path: str
     max_episode_steps: int
+    time_step: int                          # 仿真时间步长（秒），传给 sim 引擎 load_battle_scene
 
     # 实体 keys
     radar_keys: List[str]
@@ -73,6 +74,7 @@ class EnvConfig:
             plan_id=_get(conf, "plan_id", None),
             local_scene_path=_get(conf, "local_scene_path", ""),
             max_episode_steps=_get(conf, "max_episode_steps", 600),
+            time_step=_get(conf, "time_step", 1),
             radar_keys=list(_get(conf, "radar_keys", [])),
             satellites_keys=list(_get(conf, "satellites_keys", [])),
             target_keys=list(_get(conf, "target_keys", [])),
@@ -211,7 +213,7 @@ class InfraConfig:
     """基础设施与平台对接参数。"""
 
     task_id: str
-    mode: str                                # "train" | "eval"
+    mode: str                                # "train" | "eval" | "baseline"
 
     # 路径
     model_dir: str
@@ -229,10 +231,14 @@ class InfraConfig:
     zmq_pub_port: int
     push_interval: int
 
-    # 态势轨迹推送（并行模式发送线程，见 services/zmq/trajectory_pool.py）
+    # 态势轨迹推送（并行模式发送线程，见 services/zmq/situation_sender.py）
     situation_base_interval: float      # 1× 倍速时的帧间隔（秒）
     situation_speed_refresh: float      # 前端倍速参数重读 TTL（秒）
     situation_warn_episodes: int        # 发送池高水位告警阈值（局）
+    situation_pool_max: int             # 发送池容量上限（局，0=无上限，满则丢最旧）
+
+    # 任务结束清理
+    clean_scene: bool                   # 是否清理场景/预案文件（false=保留供排查）
 
     @classmethod
     def from_config(cls, conf) -> "InfraConfig":
@@ -252,4 +258,6 @@ class InfraConfig:
             situation_base_interval=float(_get(conf, "situation_base_interval", 0.5)),
             situation_speed_refresh=float(_get(conf, "situation_speed_refresh", 0.5)),
             situation_warn_episodes=int(_get(conf, "situation_warn_episodes", 200)),
+            situation_pool_max=int(_get(conf, "situation_pool_max", 0)),
+            clean_scene=bool(_get(conf, "clean_scene", True)),
         )
