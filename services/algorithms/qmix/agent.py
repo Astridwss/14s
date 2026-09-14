@@ -158,6 +158,8 @@ class Agents:
 
             if self.phase < 2:
                 action = 0            # phase1：卫星不参与动作，恒待机
+            elif epsilon == 0.0:
+                action = int(np.argmax(q))   # 纯推理：WX 也贪心，不发随机探索
             elif np.random.uniform() < self.wx_epsilon:
                 cand = np.nonzero(a)[0]
                 action = int(np.random.choice(cand)) if len(cand) > 0 else 0

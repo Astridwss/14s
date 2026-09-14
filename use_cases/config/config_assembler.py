@@ -101,6 +101,7 @@ class ConfigAssembler:
         self._load_yaml_baseline()
         self._flatten_api_params()
         self._download_scene()
+        self.print_request_config_params()
         self._parse_scene()
         self._merge()
         self._resolve_paths()
@@ -335,3 +336,25 @@ class ConfigAssembler:
 
         config._lock()
         return config
+
+    # ============================================================
+    # 步骤 9: 打印接口下发参数
+    # ============================================================
+
+    def print_request_config_params(self) -> None:
+        """打印前端实际下发的参数（已展平 + 剔除未传/None 后的有效值）。
+
+        数据源 _api_params 由 _flatten_api_params 归一化：嵌套的 hyperparameters 被展平到
+        顶层，且用 exclude_unset 只保留前端显式传入的字段 —— 这就是「接口下发了什么」。
+        （与 utils.config_printer.print_config_params 互补：那边打印最终生效的 merged 配置。）
+        """
+        params = self._api_params
+        print("\n" + "=" * 62)
+        print(f"  接口下发参数 | task_id={self._task_id} | mode={self._mode} | 共 {len(params)} 项")
+        print("=" * 62)
+        if not params:
+            print("  (前端未下发任何显式参数，全部走 YAML / 场景推导默认值)")
+        for k, v in sorted(params.items()):
+            print(f"  {k:<28} = {v!r}")
+        print()
+

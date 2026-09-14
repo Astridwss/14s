@@ -36,6 +36,7 @@ class TrainHandler:
         # ---- 一次性装配 ----
         self.conf = ConfigAssembler(self._task_id, request, mode).build()
         # 打印 RL/IL 训练、RL 推理实际使用的参数及值（核对接口传参与最终生效值）
+
         print_config_params(self.conf)
         self.push = Pusher(
             task_id=self._task_id, base_url=self.conf.PLATFORM_BASE_URL

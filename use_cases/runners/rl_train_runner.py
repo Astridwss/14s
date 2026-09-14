@@ -124,7 +124,8 @@ class RLTrainRunner(BaseRunner):
 
         # ---- 态势日志 hook ----
         self._situation_log_hook = SituationLogHook(
-            radar_keys=ec.agent_keys,
+            agent_keys=ec.agent_keys,
+            satellite_keys=ec.satellites_keys,
             target_keys=ec.target_keys,
             log_interval=50,
         )
@@ -256,6 +257,7 @@ class RLTrainRunner(BaseRunner):
                 for ep_reward, step_count, ep_data, frames in results:
                     episode_idx += 1
                     self.env_steps += step_count
+                    print(f"强化学习环境构建的训练样本池样本量: {self.env_steps}")
                     self.episode_rewards.append(ep_reward)
                     self.buffer.store_episode(ep_data) #训练buffer
                    
@@ -283,6 +285,7 @@ class RLTrainRunner(BaseRunner):
                             "loss": loss if loss is not None else 0.0,
                             "planId": getattr(self.conf, 'plan_id', 'unknown'),
                         })
+
                     if self.push is not None and (
                         is_last or (self.save_frequency > 0 and episode_idx % self.save_frequency == 0)
                     ):
@@ -291,6 +294,7 @@ class RLTrainRunner(BaseRunner):
                             "algo": "qmix", "task_id": task_id,
                             "planId": getattr(self.conf, 'plan_id', 'unknown'),
                         })
+
 
                 # ---- 计时汇总：本轮 rollout vs learning 墙钟，折算 learning 成为瓶颈的 worker 上限 ----
                 if learn_steps > 0:
@@ -308,9 +312,9 @@ class RLTrainRunner(BaseRunner):
             # 训练结束（跑满 / 暂停 / 终止 / 异常）都必须回收 spawn 出的 worker 进程：
             # 否则 N 个 worker 各持一份 env + 网络副本常驻，多次训练任务累加泄漏进程与显存。
             self._parallel.close()
-            # 停发送线程：正常结束会发完池中剩余轨迹再退出；前端消费过慢由 finish 超时兜底
+            # 停发送线程：放 DRAIN 哨兵，发送线程发完池中剩余轨迹后自行退出（不丢帧）
             if self._situation_sender is not None:
-                self._situation_sender.finish()
+                self._situation_sender.drain()
                 self._situation_sender = None
 
         print("训练管理器：本轮训练结束（并行模式）。")

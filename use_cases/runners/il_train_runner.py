@@ -67,6 +67,7 @@ class ILTrainRunner(BaseRunner):
         )
 
         self.model_dir = getattr(conf, 'model_dir', './models')
+        self.il_learner.model_dir = self.model_dir
 
     # ============================================================
     # 公开 API

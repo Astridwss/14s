@@ -121,7 +121,7 @@ class GroupedEnvWrapper:
         terminated = bool(sim_terminated)  # 自然结束：current_time > _end_tim
         truncated = bool(self._step_count >= self._max_episode_steps)
 
-        # 卫星视场覆盖（仅绘制补充，不参与训练；旁路异常不影响主流程）
+        # TXL卫星视场覆盖（仅绘制补充，不参与训练；旁路异常不影响主流程）
         try:
             satellite_fov = compute_satellite_fov_targets(
                 raw_obs, self._satellite_info, agent_actions,

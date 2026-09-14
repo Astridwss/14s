@@ -105,6 +105,17 @@ class SituationSender(threading.Thread):
             self.join(timeout=3)
             print(f"[SituationSender] 关闭超时（>{timeout}s），剩余帧已丢弃")
 
+    def drain(self):
+        """主线程不阻塞地结束：放 DRAIN 哨兵，发送线程按前端倍速发完剩余帧后自行退出。
+
+        与 finish() 的区别：
+          - 不 join()（不阻塞主线程，推理接口可立即返回结果路径）；
+          - 不设超时强制丢弃（前端消费慢也不丢帧）。
+
+        适用于「正常训练/推演结束，前端继续消费剩余态势回放」的场景。
+        """
+        self._pool.put(SituationPool.DRAIN)
+
     def stop(self):
         """强制终止：立即丢弃池中剩余并退出。"""
         self._stop_event.set()

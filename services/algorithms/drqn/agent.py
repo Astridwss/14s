@@ -40,6 +40,8 @@ class ILAgents:
         self.device = self._ac.device
         # 权重文件名前缀（实体数 + 分组数），与 qmix/policy.py 保存侧保持一致
         self.weight_prefix = prefix_from_conf(conf)
+        # 保存目录：默认取 conf.model_dir，Runner 会把自己的 self.model_dir 注入进来覆盖
+        self.model_dir = getattr(conf, 'model_dir', None)
 
         # 对齐 QMIX 的 input_shape 计算逻辑
         obs_dim = self._ac.obs_shape[0] if isinstance(self._ac.obs_shape, tuple) else self._ac.obs_shape
@@ -145,7 +147,7 @@ class ILAgents:
         return metrics
 
     def save_model(self, epoch=None):
-        model_dir = getattr(self.conf, 'model_dir', None)
+        model_dir = self.model_dir
         if not model_dir:
             return
 

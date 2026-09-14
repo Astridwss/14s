@@ -37,6 +37,7 @@ class Pusher:
     def push_metrics(self, metrics_data: dict) -> None:
         """推送训练指标（RL / IL 共用，异步）。"""
         metrics_data["taskId"] = self._task_id
+        print(f"[任务结束推送信息]:{metrics_data}")
         self._async_post(self._metrics_url, metrics_data)
 
     def push_weights(self, weight_data: dict) -> None:
@@ -50,7 +51,7 @@ class Pusher:
         }
         if "absCsvPath" in weight_data:
             payload["absCsvPath"] = weight_data["absCsvPath"]
-
+        print(f"[任务结束推送模型权重信息]:{payload}")
         self._async_post(self._weights_url, payload, "模型路径上传失败")
 
     def push_eval_result(self, result_data: dict) -> None:

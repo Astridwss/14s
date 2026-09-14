@@ -65,9 +65,9 @@ drqn:
 # 训练全局控制 (Train 模式公共配置)
 train:
   max_episodes: 5000             # RL 默认训练回合数
-  rl_num_workers: 32              # RL 并行环境采样 worker 数（>1 启用多进程 rollout；按机器 CPU 核数调，可被环境变量 NUM_ENV_WORKERS 覆盖）
+  rl_num_workers: 1             # RL 并行环境采样 worker 数（>1 启用多进程 rollout；按机器 CPU 核数调，可被环境变量 NUM_ENV_WORKERS 覆盖）
   utd_ratio: 1                   # UTD 比：每新采 1 局做几次梯度更新（replay 复用，喂饱 GPU；1=原行为，4~8 常用）
-  il_num_workers: 16              # IL 数据加载并行进程数（DataLoader num_workers；独立于 RL 的 env 采样 num_workers；Windows 开发机报错可设 0）
+  il_num_workers: 1              # IL 数据加载并行进程数（DataLoader num_workers；独立于 RL 的 env 采样 num_workers；Windows 开发机报错可设 0）
   expert_csv_workers: 8           # IL 专家数据生成多进程数（按时间步切分并行；1=串行原行为，0=自动 min(cpu,8)）
   load_dir: "./load_dir"
   epochs: 50                     # IL 默认训练轮数
@@ -108,7 +108,7 @@ baseline:
 infra:
   # 任务控制标志位目录（由 TaskController 统一管理，按 task_id 分目录）:
   #   {PROJECT_ROOT}/tmp_flag/{task_id}/pause.flag | terminate.flag | speed.flag
-  PLATFORM_BASE_URL: http://7.81.21.52:18029
+  PLATFORM_BASE_URL: http://127.0.0.1:8080
   zmq_server_ip: 7.81.21.51
   zmq_pub_port: 5558
   push_interval: 1          # 每 N 回合推送一次态势，0=不推送

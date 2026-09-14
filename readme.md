@@ -18,37 +18,33 @@ http://127.0.0.1:8000/map?task_id=任务ID
 curl -X POST http://127.0.0.1:8000/api/v1/train/rl \
 -H "Content-Type: application/json" \
 -d '{
-		"max_episodes": 3000,
-		"max_episode_steps": 60,
-		"group_size": 10,
-		"algorithm": "qmix",
-		"task_id": "rl_test_828_1",
-		"plan_id": "867",
-		"load_dir": "",
-		"scene_url": "C:\webace_2026\14s\code\webace-3\scene.json",
-		"push_interval": 1,
-		"rl_num_workers": 16,
-		"hyperparameters": {
-		  "show_log": true,
-		  "seed": 42,
-		  "device": "npu",
-
-		  "learning_rate": 0.0005,
-		  "gamma": 0.99,
-		  "batch_size": 8,
-		  "buffer_size": 32,
-		  "train_seq_len": 60,
-		  "update_target_params": 200,
-		  "grad_norm_clip": 10.0,
-
-		  "epsilon_start": 1.0,
-		  "epsilon_finish": 0.05,
-		  "epsilon_anneal_time": 400000,
-
-		  "drqn_hidden_dim": 128,
-		  "qmix_hidden_dim": 32,
-		  "hyper_hidden_dim": 128
-		}
+    "max_episodes": 3000,
+    "max_episode_steps": 520,
+    "group_size": 10,
+    "algorithm": "qmix",
+    "task_id": "rl_test_828_2",
+    "plan_id": "9999",
+    "load_dir": "",
+    "scene_url": "C:/webace_2026/14s/code/webace-3/mock_scene_200r_50s_21t.json",
+    "push_interval": 1,
+    "hyperparameters": {
+      "show_log": true,
+      "seed": 42,
+      "device": "cuda",
+      "learning_rate": 0.0005,
+      "gamma": 0.995,
+      "batch_size": 32,
+      "buffer_size": 256,
+      "train_seq_len": 60,
+      "update_target_params": 200,
+      "grad_norm_clip": 10.0,
+      "epsilon_start": 1.0,
+      "epsilon_finish": 0.1,
+      "epsilon_anneal_time": 400000,
+      "drqn_hidden_dim": 128,
+      "qmix_hidden_dim": 32,
+      "hyper_hidden_dim": 128
+    }
 }'
 
 

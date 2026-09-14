@@ -453,7 +453,7 @@ class PlanFileProcess:
                 Tuple[TwoDimensionMinMax, List[str]]] = gantt_chart.overlapping_number_analysis_in_total(2,
                                                                                                          OverlappingNumberRequirement.OVERLAPPING_NUMBER_REQUIREMENT_LARGER)
 
-            target_traj_total_time = 1800
+            target_traj_total_time = 2600
             if str_target_id in battle_scene.dict_target_id_info:
                 target_traj_total_time = len(
                     battle_scene.dict_target_id_info.get(str_target_id).dict_target_traj_pt_info)

@@ -9,11 +9,12 @@ action / state / reward），面向 step 循环；本包面向**整局方案产�
 """
 
 from services.evaluation.coverage import CoverageSummary, parse_metric_file
+from services.evaluation.metric_writer import write_plan_metric_to_json
 from services.evaluation.baseline import (
     BaselineArtifacts, BaselineEvaluator, scene_target_ids,
 )
 
 __all__ = [
-    "CoverageSummary", "parse_metric_file",
+    "CoverageSummary", "parse_metric_file", "write_plan_metric_to_json",
     "BaselineArtifacts", "BaselineEvaluator", "scene_target_ids",
 ]

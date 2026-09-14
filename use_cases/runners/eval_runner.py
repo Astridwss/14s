@@ -25,7 +25,7 @@ from services.algorithms.qmix.agent import Agents
 from services.sample.rollout import RolloutWorker
 from services.scene.grouping import RadarGrouper
 from services.evaluation import (
-    BaselineEvaluator, parse_metric_file, scene_target_ids,
+    BaselineEvaluator, parse_metric_file, scene_target_ids, write_plan_metric_to_json,
 )
 from sim import PlanFileProcess
 from utils.weight_naming import build_weight_prefix
@@ -49,15 +49,6 @@ def _default_json_encoder(obj):
     raise TypeError(
         f"Object of type {type(obj).__name__} is not JSON serializable"
     )
-
-
-def _stringify_keys(d):
-    """递归将字典所有键转为 str。"""
-    if isinstance(d, dict):
-        return {str(k): _stringify_keys(v) for k, v in d.items()}
-    if isinstance(d, list):
-        return [_stringify_keys(i) for i in d]
-    return d
 
 
 def _fmt_time(ts):
@@ -123,6 +114,11 @@ class EvalRunner(BaseRunner):
         self.agents.policy.load_state(load_dir)
         print(f"[EvalRunner] 成功加载推演权重: {load_dir}")
 
+        # 同步训练阶段：模型已训过 phase1（WX 解冻）→ 推理也置 phase2，
+        # 否则 Agents.phase 默认 1，WX 恒待机（action=0），看不到卫星动作/弧段。
+        self.agents.set_phase(2)
+        self.env.set_phase(2)
+
         # 6. 初始化数据采集目录
         self.eval_records_dir = getattr(conf, 'eval_records_dir', './eval_records')
         os.makedirs(self.eval_records_dir, exist_ok=True)
@@ -164,7 +160,8 @@ class EvalRunner(BaseRunner):
 
         # ---- 态势日志 hook ----
         self._situation_log_hook = SituationLogHook(
-            radar_keys=ec.agent_keys,
+            agent_keys=ec.agent_keys,
+            satellite_keys=ec.satellites_keys,
             target_keys=ec.target_keys,
             log_interval=50,
         )
@@ -253,9 +250,9 @@ class EvalRunner(BaseRunner):
 
                 all_eval_data[f"episode_{episode_idx}"] = eval_records
         finally:
-            # 发完池中剩余轨迹再退出（前端消费过慢由 finish 超时兜底）
+            # 放 DRAIN 哨兵，发送线程发完池中剩余轨迹后自行退出（不丢帧、不阻塞主线程）
             if self._situation_sender is not None:
-                self._situation_sender.finish()
+                self._situation_sender.drain()
                 self._situation_sender = None
 
         return self._finalize(all_eval_data, start_time)
@@ -382,7 +379,10 @@ class EvalRunner(BaseRunner):
             return None, None
 
         single_episode_records = list(all_eval_data.values())[-1]
-        safe_eval_data = _stringify_keys(single_episode_records)
+        # 键是整数 action_time（EvalRecorder 落盘）。sim 端
+        # update_model_inference_satellite_result 会做 `time > 0` 数值比较，
+        # 不能把键 stringify 成字符串，否则 `'>' str vs int` 报错。
+        safe_eval_data = single_episode_records
 
         task_id = getattr(self.conf, 'task_id', 'local_test')
         result_file_name = f"{task_id}_eval_records.json"
@@ -400,12 +400,19 @@ class EvalRunner(BaseRunner):
 
             processor.write_model_inference_result_to_json(
                 dict_model_inference_result=safe_eval_data,
+                battle_scene=battle_scene,
                 dest_path=result_abs_path
             )
-            processor.write_model_inference_metric_to_json(
+            # 评估指标文件改用 sim 外重写版：覆盖率分母按目标自身轨迹时长（秒），
+            # 修正 sim 原实现「分母=轨迹点数」导致的覆盖率破百/偏低。
+            plan_result = processor.write_model_inference_result_to_plan_result(
                 dict_model_inference_result=safe_eval_data,
                 battle_scene=battle_scene,
-                dest_path=metric_abs_path
+            )
+            write_plan_metric_to_json(
+                plan_result=plan_result,
+                battle_scene=battle_scene,
+                dest_path=metric_abs_path,
             )
 
             return result_abs_path, metric_abs_path
