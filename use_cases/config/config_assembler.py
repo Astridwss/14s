@@ -101,7 +101,7 @@ class ConfigAssembler:
         self._load_yaml_baseline()
         self._flatten_api_params()
         self._download_scene()
-        self.print_request_config_params()
+        self._print_request_config_params()
         self._parse_scene()
         self._merge()
         self._resolve_paths()
@@ -341,7 +341,7 @@ class ConfigAssembler:
     # 步骤 9: 打印接口下发参数
     # ============================================================
 
-    def print_request_config_params(self) -> None:
+    def _print_request_config_params(self) -> None:
         """打印前端实际下发的参数（已展平 + 剔除未传/None 后的有效值）。
 
         数据源 _api_params 由 _flatten_api_params 归一化：嵌套的 hyperparameters 被展平到

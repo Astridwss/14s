@@ -219,6 +219,7 @@ class InfraConfig:
     model_dir: str
     result_dir: str
     load_dir: str
+    load_type: str
     eval_records_dir: str
 
     # 任务控制
@@ -248,6 +249,7 @@ class InfraConfig:
             model_dir=_get(conf, "model_dir", "./models"),
             result_dir=_get(conf, "result_dir", "./results"),
             load_dir=_get(conf, "load_dir", ""),
+            load_type=_get(conf, "load_type", "il"),
             eval_records_dir=_get(conf, "eval_records_dir", "./eval_records"),
             pause_flag_file=_get(conf, "pause_flag_file", ""),
             terminate_flag_file=_get(conf, "terminate_flag_file", ""),

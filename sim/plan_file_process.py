@@ -105,7 +105,7 @@ class PlanFileProcess:
                                             sensor_ele_max = dict_work_mode.get('workModeParameters').get(
                                                 'elevation') / 2.0
                                             sensor_pointing_max = dict_work_mode.get('workModeParameters').get(
-                                                'pointing')
+                                                'pointing', 10.0)
 
                                             if first_count_flag:
                                                 satellite_info.azi_min = sensor_azi_min

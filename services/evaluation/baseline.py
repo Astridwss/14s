@@ -27,6 +27,7 @@ from typing import Optional
 from sim import PlanFileProcess
 
 from services.evaluation.coverage import CoverageSummary, parse_metric_file
+from services.evaluation.metric_writer import write_plan_metric_to_json
 
 
 @dataclass
@@ -110,11 +111,13 @@ class BaselineEvaluator:
             os.path.join(out_dir, f"{task_id}{self.METRIC_SUFFIX}")
         )
 
-        # 与推理侧共用的两个写函数，保证 JSON 结构逐键同构
+        # 与推理侧共用的两个写函数，保证 JSON 结构逐键同构。
+        # 指标文件改用 sim 外重写版：覆盖率分母按目标自身轨迹时长（秒），
+        # 与推理侧同口径，修正 sim 原实现「分母=轨迹点数」导致的覆盖率破百。
         self._processor.write_plan_result_to_json(
             plan_result=plan_result, dest_path=records_path,
         )
-        self._processor.write_plan_metric_to_json(
+        write_plan_metric_to_json(
             plan_result=plan_result, battle_scene=battle_scene,
             dest_path=metric_path,
         )

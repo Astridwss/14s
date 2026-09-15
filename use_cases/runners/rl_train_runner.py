@@ -94,8 +94,8 @@ class RLTrainRunner(BaseRunner):
 
         self.agents = Agents(conf, algo_config=ac, group_assignments=group_assignments)
 
-        # IL → RL 热启动：仅加载 DRQN 预训练权重（混频器从零训练）
-        self._maybe_warm_start(ic)
+        # 加载预训练/续训权重（load_type: il=主干热启动 / rl=全量续训）
+        self._maybe_load(ic)
 
         self.buffer = EpisodeReplayBuffer(conf, algo_config=ac, train_config=tc)
         self.rollout_worker = RolloutWorker(
@@ -447,16 +447,25 @@ class RLTrainRunner(BaseRunner):
         except OSError as e:
             print(f"[RLTrainRunner] 训练元数据写入失败（不影响训练）: {e}")
 
-    def _maybe_warm_start(self, ic) -> None:
-        """若 load_dir 指定且存在，则用 IL 预训练权重热启动 DRQN。
+    def _maybe_load(self, ic) -> None:
+        """按 load_type 加载权重（load_dir 由人工选择，无需按文件内容自动区分）。
 
-        细节（文件名、state_dict 加载）下沉到算法层 load_drqn_state。
+        - load_type == "il"：IL → RL 热启动，只迁移共享主干（fc1/layer_norm/rnn），
+          输出头与混频器结构/语义不同（IL 头为 CE logits、混频器为随机占位），不能搬。
+        - load_type == "rl"：RL → RL 续训，全量加载 drqn + 混频器（load_state 内部同步 target）。
+
+        细节（文件名、state_dict 加载）下沉到算法层 load_drqn_state / load_state。
         """
         load_dir = getattr(ic, 'load_dir', '')
         if not load_dir or not os.path.exists(load_dir):
             return
-        self.agents.policy.load_drqn_state(load_dir)
-        print(f"[RLTrainRunner] 已用预训练权重热启动 DRQN: {load_dir}")
+
+        if getattr(ic, 'load_type', 'il') == 'rl':
+            self.agents.policy.load_state(load_dir)
+            print(f"[RLTrainRunner] 已加载 RL 训练权重继续训练: {load_dir}")
+        else:
+            self.agents.policy.load_drqn_state(load_dir)
+            print(f"[RLTrainRunner] 已用预训练权重热启动 DRQN: {load_dir}")
 
     def _learn_batch(self, epsilon: float, n_steps: int):
         """连续做 n_steps 步梯度更新（replay 复用，UTD ratio）。

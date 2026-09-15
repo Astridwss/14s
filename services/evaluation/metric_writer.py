@@ -38,6 +38,23 @@ def _target_trajectory_duration(target_id: str, battle_scene: BattleScene) -> in
     return 1  # 空/单点轨迹：按 1s 计，避免除零
 
 
+def _target_trajectory_bounds(target_id: str, battle_scene: BattleScene):
+    """目标自身轨迹的时间边界 (min_time, max_time)（秒）。
+
+    探测弧段落在轨迹窗口之外时（卫星视场 index 错位误加、或预案把跟踪窗口
+    排到目标飞行窗口之外），分子「覆盖秒数」会超过分母「轨迹时长」导致覆盖率
+    破百。用此边界把探测弧段裁剪到目标真实飞行窗口内。
+    目标缺失或轨迹点不足 2 个时返回 None（不裁剪，走原逻辑）。
+    """
+    target_info = battle_scene.dict_target_id_info.get(target_id)
+    if target_info is None:
+        return None
+    traj_times = sorted(target_info.dict_target_traj_pt_info.keys())
+    if len(traj_times) < 2:
+        return None
+    return traj_times[0], traj_times[-1]
+
+
 def write_plan_metric_to_json(
     plan_result: PlanResult,
     battle_scene: BattleScene,
@@ -65,6 +82,8 @@ def write_plan_metric_to_json(
     dict_eva_result = {}
     dict_eva_result['vecTargetEvaResult'] = []
 
+    clipped_total = 0  # 诊断：落在目标轨迹窗口之外、被裁剪/剔除的探测弧段数
+
     for str_target_id, dict_equip_id_detection_time in dict_target_id_equip_id_detection_time.items():
         # for循环，每个目标一个
         dict_target_eva_result = {}
@@ -73,19 +92,36 @@ def write_plan_metric_to_json(
         gantt_chart = GanttChart()
         gantt_chart.str_body_name = str_target_id
 
+        # 轨迹时间边界：把探测弧段裁剪到目标真实飞行窗口内，剔除窗口之外的伪探测
+        # （卫星视场 index 错位误加 / 预案跟踪窗口超界），否则分子会超过分母而破百。
+        bounds = _target_trajectory_bounds(str_target_id, battle_scene)
+        bounds_range = TwoDimensionMinMax(bounds[0], bounds[1]) if bounds is not None else None
+        target_clipped = 0  # 本目标被裁剪/剔除的弧段数
+
         for str_equip_id, lst_detection_time in dict_equip_id_detection_time.items():
             for detection_time in lst_detection_time:
                 if str_equip_id not in gantt_chart.dict_activity:
                     gantt_chart.dict_activity[str_equip_id] = []
 
-                gantt_chart.dict_activity[str_equip_id].append(detection_time.time_range)
+                time_range = detection_time.time_range
+                if bounds_range is not None:
+                    if not time_range.whether_intersected(bounds_range):
+                        clipped_total += 1
+                        target_clipped += 1
+                        continue  # 完全落在轨迹之外，不计入覆盖率
+                    if time_range.value_min < bounds_range.value_min or time_range.value_max > bounds_range.value_max:
+                        clipped_total += 1  # 部分越界，被裁剪
+                        target_clipped += 1
+                    time_range = time_range.intersected(bounds_range)
+
+                gantt_chart.dict_activity[str_equip_id].append(time_range)
 
         lst_result_over_one_cover: List[Tuple[TwoDimensionMinMax, List[str]]] = gantt_chart.overlapping_number_analysis_in_total(0, OverlappingNumberRequirement.OVERLAPPING_NUMBER_REQUIREMENT_LARGER)
         lst_result_one_cover: List[Tuple[TwoDimensionMinMax, List[str]]] = gantt_chart.overlapping_number_analysis_in_total(1, OverlappingNumberRequirement.OVERLAPPING_NUMBER_REQUIREMENT_EQUAL)
         lst_result_two_cover: List[Tuple[TwoDimensionMinMax, List[str]]] = gantt_chart.overlapping_number_analysis_in_total(2, OverlappingNumberRequirement.OVERLAPPING_NUMBER_REQUIREMENT_EQUAL)
         lst_result_over_three_cover: List[Tuple[TwoDimensionMinMax, List[str]]] = gantt_chart.overlapping_number_analysis_in_total(2, OverlappingNumberRequirement.OVERLAPPING_NUMBER_REQUIREMENT_LARGER)
 
-        # 分母：目标自身轨迹时长（秒），与分子 over_one_cover_time（覆盖秒数）同口径
+        # 分母：目标自身轨迹时长（秒），与分子 over_one_cover_time（覆盖秒数）
         target_traj_total_time = _target_trajectory_duration(str_target_id, battle_scene)
 
         if target_traj_total_time > 0:
@@ -100,6 +136,15 @@ def write_plan_metric_to_json(
                 if i < len(lst_result_over_one_cover) - 1:
                     if abs(lst_result_over_one_cover[i + 1][0].value_min - time_range.value_max) > 1e-6:
                         interrupt_num += 1
+
+            # 兜底：裁剪后仍可能因浮点/边界略超，覆盖秒数绝不大于轨迹时长（绝不破百）
+            over_one_cover_time = min(over_one_cover_time, target_traj_total_time)
+
+            # 诊断：打印每个目标的分子/分母，便于在离线机核对口径（秒）与破百根因
+            traj_desc = f"[{bounds[0]},{bounds[1]}]" if bounds is not None else "?"
+            print(f"[metric_writer] target={str_target_id} traj={traj_desc} "
+                  f"denom={target_traj_total_time}s num={over_one_cover_time:.1f}s "
+                  f"rate={over_one_cover_time / target_traj_total_time * 100.0:.2f}% clipped={target_clipped}")
 
             dict_continuity_result = {'dDetectCoverAge': over_one_cover_time / target_traj_total_time * 100.0,
                                       'regionType': 'ENUM_COMPREHENSIVE', 'uiInterruputNum': interrupt_num}
@@ -136,5 +181,8 @@ def write_plan_metric_to_json(
     data['schemeEvaluteResult'] = json.dumps(data['schemeEvaluteResult'])
     with open(dest_path, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=4)
+
+    if clipped_total:
+        print(f"[metric_writer] 已裁剪 {clipped_total} 段落在目标轨迹窗口之外的探测弧段（覆盖率破百根因）")
 
     return

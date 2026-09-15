@@ -57,6 +57,7 @@ class RLTrainRequest(BaseModel):
     task_id: str
     plan_id: int
     load_dir: str = Field(..., description="选择要继续训练的权重路径")
+    load_type: str = Field(default="il", description="权重来源类型: il=IL预训练(只装主干) / rl=RL训练权重(全量续训)")
     scene_url: str = Field(..., description="平台下发的场景文件本地路径")
     max_episodes: int = Field(..., description="最大推演局数", gt=0)
     max_episode_steps: Optional[int] = Field(default=None, description="单个回合的最大步数")
