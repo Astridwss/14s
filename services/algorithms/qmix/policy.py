@@ -15,7 +15,7 @@ from services.scene.state.group_slicer import (
     global_pooled_state_dim,
 )
 from utils.weight_naming import prefix_from_conf, weight_file_name
-from services.scene.scene_constants import LD_CAPACITY
+from services.scene.scene_constants import LD_CAPACITY, MAX_RADARS, build_agent_count_mask
 
 
 _GROUPSIZE_RE = re.compile(r"groupsize\d+")
@@ -476,7 +476,9 @@ class HQMIX(_BasePolicy):
         self.group_assignments = group_assignments
         self.G = len(group_assignments)
         self.K = max(len(g) for g in group_assignments)
-        self.n_targets = getattr(conf, 'n_targets', 21)
+        # 状态目标段宽度恒按 MAX 槽位（= ld_n_actions），与 ObservationBuilder 的
+        # MAX_TARGETS×8 布局一致；不能用 conf.n_targets（真实数，低实体数场景会更小）。
+        self.n_targets = self.ld_n_actions
         self.ld_capacity = LD_CAPACITY
         self.phase = 1
 
@@ -486,6 +488,25 @@ class HQMIX(_BasePolicy):
             for k, idx in enumerate(indices):
                 if idx < 0:
                     self._agent_mask[g, k] = 0.0
+
+        # 组级 mask: (G,), 1=真实组 0=空组（整组全 -1）。
+        # LowerMixer 的 ELU 偏置 b1/b2 即使输入全零也会产出非零 q_group（空组泄漏），
+        # 需在 LowerMixer 输出后、UpperMixer 输入前把空组的 q_group 归零。
+        self._group_mask = torch.tensor(
+            [1.0 if any(idx >= 0 for idx in g) else 0.0 for g in group_assignments],
+        )
+
+        # WX agent 计数掩码 (n_wx,)：真实卫星槽位=1、dummy 卫星槽位=0。
+        # LD 分支的 dummy 雷达已由分组的 -1 padding（_agent_mask / _group_mask）屏蔽；
+        # WX 走独立 QMIXNET、无分组，需单独把 dummy 卫星的 Q 归零再进 wx_mixer。
+        # 无实体 keys 的旧 dense 路径退化为全 1（不掩）。
+        radar_keys = list(getattr(conf, 'radar_keys', []) or [])
+        sat_keys = list(getattr(conf, 'satellites_keys', []) or [])
+        if radar_keys or sat_keys:
+            _count_mask = build_agent_count_mask(radar_keys + sat_keys, sat_keys)
+            self._wx_mask = torch.tensor(_count_mask[MAX_RADARS:], device=self.device)
+        else:
+            self._wx_mask = torch.ones(self.n_wx, device=self.device)
 
         # ---- 状态维度 ----
         self.s_k_dim = group_local_state_dim(self.K, self.n_targets)
@@ -566,9 +587,11 @@ class HQMIX(_BasePolicy):
 
         # WX 分支（phase1 排除，避免随机 WX 输出污染 LD 训练）
         if self.phase >= 2:
-            q_tot = q_tot + self.eval_wx_mixer(chosen_q[:, :, self.n_ld:], states)
+            # dummy 卫星槽位 Q 归零（agent 计数掩码），避免垃圾 Q 泄漏进 wx_mixer。
+            wx_mask = self._wx_mask.to(device).view(1, 1, -1)
+            q_tot = q_tot + self.eval_wx_mixer(chosen_q[:, :, self.n_ld:] * wx_mask, states)
             with torch.no_grad():
-                target_q_tot = target_q_tot + self.target_wx_mixer(target_max_q[:, :, self.n_ld:], next_states)
+                target_q_tot = target_q_tot + self.target_wx_mixer(target_max_q[:, :, self.n_ld:] * wx_mask, next_states)
 
         # TD loss
         targets = rewards + self.conf.gamma * (1 - terminated) * target_q_tot
@@ -656,7 +679,10 @@ class HQMIX(_BasePolicy):
         )
 
         # Lower: 组内混频
-        q_groups = lower_mixer(q_grouped, group_states).squeeze(-1)
+        q_groups = lower_mixer(q_grouped, group_states).squeeze(-1)   # (B, T, G)
+
+        # 组级 mask：空组（整组 -1）的 q_group 归零，避免 LowerMixer ELU 偏置泄漏进 UpperMixer
+        q_groups = q_groups * self._group_mask.to(device).view(1, 1, self.G)
 
         # 全局池化状态
         S = build_global_pooled_state(

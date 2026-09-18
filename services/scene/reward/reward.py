@@ -22,6 +22,7 @@ import numpy as np
 import pymap3d as pm
 
 from services.scene.state.satellite_broadcast import compute_boundary_gap
+from services.scene.scene_constants import build_agent_slot_map
 
 
 # ============================================================
@@ -134,10 +135,13 @@ class RewardCalculator:
     EDGE_RATIO = 0.85                       # 边缘判定阈值（distance > ratio * range_max）
 
     def __init__(self, agent_keys: List[str], target_keys: List[str],
-                 wx_enabled: bool = True):
+                 wx_enabled: bool = True, satellite_keys: Optional[List[str]] = None):
         self.agent_keys = list(agent_keys)
         self.target_keys = list(target_keys)
         self.wx_enabled = wx_enabled  # phase1（纯 LD 标定）置 False，屏蔽 R_wx
+        # 可变实体数泛化：动作张量按固定槽位排布，读 actions 用「实体 ID → 槽位」而非 dense 下标
+        # （满载两者一致；低实体数时卫星 dense 下标 != 槽位，见 build_agent_slot_map）。
+        self._agent_slot = build_agent_slot_map(self.agent_keys, satellite_keys)
 
     # ============================================================
     # 入口
@@ -199,7 +203,8 @@ class RewardCalculator:
             aid = self.agent_keys[i]
             if aid not in radar_set:
                 continue
-            for b in np.nonzero(actions[i])[0]:
+            row = actions[self._agent_slot[aid]]
+            for b in np.nonzero(row)[0]:
                 b = int(b)
                 if b < 1 or b > len(self.target_keys):
                     continue
@@ -246,8 +251,9 @@ class RewardCalculator:
                 continue
 
             # 单选：取第一个置位的目标 bit（WX 容量 1，理论上至多一个）
+            row = actions[self._agent_slot[aid]]
             t = None
-            for b in np.nonzero(actions[i])[0]:
+            for b in np.nonzero(row)[0]:
                 b = int(b)
                 if 1 <= b <= len(self.target_keys):
                     t = self.target_keys[b - 1]
@@ -293,12 +299,13 @@ class RewardCalculator:
 
         n = min(prev.shape[0], len(self.agent_keys))
         for i in range(n):
-            dropped = (prev[i] > 0) & (cur[i] == 0)
+            equip_id = self.agent_keys[i]
+            slot = self._agent_slot[equip_id]
+            dropped = (prev[slot] > 0) & (cur[slot] == 0)
             for b in np.nonzero(dropped)[0]:
                 b = int(b)
                 if b < 1 or b > len(self.target_keys):
                     continue
-                equip_id = self.agent_keys[i]
                 target_id = self.target_keys[b - 1]
                 res = detection.get(equip_id, {}).get(target_id)
                 if res is None or not res.detectable_flag:

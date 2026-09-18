@@ -66,6 +66,7 @@ class GroupedEnvWrapper:
         self._reward_calc = RewardCalculator(
             agent_keys=agent_keys,
             target_keys=ec.target_keys,
+            satellite_keys=list(satellite_keys),
         )
 
     @property

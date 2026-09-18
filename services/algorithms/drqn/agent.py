@@ -11,6 +11,7 @@ from use_cases.config.config_types import AlgorithmConfig
 
 # 导入 qmix（EPyMARL） 网络架构，保证与强化学习维度对齐
 from services.algorithms.qmix.nn import DRQN, QMIXNET
+from services.scene.scene_constants import build_agent_count_mask
 from utils.weight_naming import prefix_from_conf, weight_file_name
 
 class FocalLoss(nn.Module):
@@ -72,6 +73,18 @@ class ILAgents:
         print(f"[ILAgents] 类别权重: 待机=1.0, 目标动作×{self._ac.n_actions - 1}"
               f"={positive_weight}")
 
+        # agent 计数掩码 (n_agents,)：dummy agent（padding 槽位）=0、真实实体=1。
+        # 由 conf 的真实实体 keys 推导（与固定槽位布局一致）；无 keys 的旧 dense 路径
+        # 退化为全 1（不掩），保证向下兼容。
+        agent_keys = list(getattr(conf, 'radar_keys', []) or [])
+        sat_keys = list(getattr(conf, 'satellites_keys', []) or [])
+        if agent_keys or sat_keys:
+            self._agent_mask = torch.tensor(
+                build_agent_count_mask(agent_keys + sat_keys, sat_keys), device=self.device,
+            )
+        else:
+            self._agent_mask = torch.ones(self._ac.n_agents, device=self.device)
+
 
     def _forward_pass(self, batch):
         """"""
@@ -110,14 +123,19 @@ class ILAgents:
         # 与旧实现 total_loss/seq_len 数学等价（每个 criterion 本就是对该步的均值）。
         flat_q = q_values.reshape(-1, n_actions)
         flat_a = expert_actions.reshape(-1)
-        loss = self.criterion(flat_q, flat_a)
+
+        # agent 计数掩码：dummy agent（padding 槽位）的 CE 不参与，避免垃圾 logits 稀释真实梯度。
+        agent_mask = self._agent_mask[:N].view(1, 1, N, 1).expand(B, T, -1, -1).reshape(-1)
+        ce = F.cross_entropy(flat_q, flat_a, weight=self.criterion.weight, reduction='none')
+        loss = (ce * agent_mask).sum() / agent_mask.sum().clamp(min=1.0)
 
         preds = flat_q.argmax(dim=1)
         active = (flat_a > 0)
-        corr_global = (preds == flat_a).sum().item()
-        tot_global = flat_a.numel()
-        corr_active = ((preds == flat_a) & active).sum().item()
-        tot_active = active.sum().item()
+        valid = agent_mask > 0
+        corr_global = ((preds == flat_a) & valid).sum().item()
+        tot_global = int(valid.sum().item())
+        corr_active = ((preds == flat_a) & active & valid).sum().item()
+        tot_active = int((active & valid).sum().item())
 
         metrics = {
             'acc_global': corr_global / tot_global if tot_global > 0 else 0.0,

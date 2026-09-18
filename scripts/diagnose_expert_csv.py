@@ -36,10 +36,12 @@ def main():
         agent_keys=radar_keys + sat_keys, target_keys=target_keys,
         n_agents=dims["n_agents"], n_targets=n_targets,
         n_actions=dims["n_actions"], radar_obs_dim=dims["radar_obs_dim"],
+        satellite_ids=sat_keys,
     )
     action_mapper = ActionMapper(
         agent_keys=radar_keys + sat_keys, target_keys=target_keys,
         n_agents=dims["n_agents"], n_actions=dims["n_actions"],
+        satellite_keys=sat_keys,
     )
 
     class DummyConf:

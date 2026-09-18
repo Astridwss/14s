@@ -116,4 +116,4 @@ infra:
   situation_speed_refresh: 0.5    # 前端倍速参数重读 TTL（秒）访问临时文件中的speed
   situation_warn_episodes: 200    # 发送池高水位告警阈值（局），超过告警一次
   situation_pool_max: 300         # 发送池容量上限（局），0=无上限；满则丢最旧防内存爆（需 > warn阈值，先告警后丢）
-  clean_scene: true               # 任务结束后是否清理场景/预案文件（false=保留供排查）
+  clean_scene: false               # 任务结束后是否清理场景/预案文件（false=保留供排查）

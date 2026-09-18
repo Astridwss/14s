@@ -347,9 +347,13 @@ class RolloutWorker:
         """从 ObservationBuilder 推断全局状态维度。
 
         状态布局与 ObservationBuilder.build_global_state() 保持一致:
-          [targets (n_targets×8) | agents (n_agents×5) | time (1)]
+          [targets (MAX_TARGETS×8) | agents (MAX_AGENTS×5) | time (1)]
+        可变实体数泛化：目标段恒按 MAX_TARGETS 布局，不能用 len(self.target_keys)
+        （真实目标数，低实体数场景会偏小，导致预分配 buffer 与 build_global_state 输出错位）。
         """
-        from services.scene.scene_constants import TARGET_STATE_FEATURES, RADAR_STATE_FEATURES
-        n_agents = self.agents.n_agents
-        n_targets = len(self.target_keys)
+        from services.scene.scene_constants import (
+            TARGET_STATE_FEATURES, RADAR_STATE_FEATURES, MAX_TARGETS,
+        )
+        n_agents = self.agents.n_agents   # 恒 MAX_AGENTS（维度锁定）
+        n_targets = MAX_TARGETS           # 恒 21，与 build_global_state 的 MAX_TARGETS×8 布局一致
         return n_targets * TARGET_STATE_FEATURES + n_agents * RADAR_STATE_FEATURES + 1

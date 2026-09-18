@@ -9,6 +9,7 @@ from typing import Tuple, List
 from services.scene.scene_constants import (
     RADAR_SELF_FEATURES, TARGET_FEATURES, SATELLITE_BROADCAST_FEATURES,
     RADAR_STATE_FEATURES, TARGET_STATE_FEATURES,
+    MAX_RADARS, MAX_SATELLITES, MAX_TARGETS, MAX_AGENTS, MAX_ACTIONS,
 )
 
 
@@ -202,14 +203,18 @@ def extract_entities(scene_path: str, plan_id: int) -> Tuple[int, int, int, List
 
 
 def compute_dimensions(n_radars: int, n_satellites: int, n_targets: int) -> dict:
-    """根据实体数量推导网络张量维度。
+    """不论实体数多少，维度掩码。
+
+    可变实体数泛化：网络权重形状只由 MAX_* 常量决定，一套网络向下兼容任意实体数场景。
+    真实实体数 n_radars / n_satellites / n_targets 仅用于诊断打印，不参与维度计算；
+    实体数不足时由 ObservationBuilder / ActionMapper 用 padding 占满槽位 + mask 屏蔽 dummy。
 
     统一骨架：智能体 = 雷达(LD) + 卫星(WX)，从第一天固定 n_agents，
     避免 phase1(LD) → phase2(LD+WX) 之间任何权重维度变化。
 
     动作空间：
-      - WX 单选：n_actions = n_targets + 1（0=待机，1..N=锁定目标）
-      - LD 多标签：ld_n_actions = n_targets（无待机维，逐目标独立 Q，top-20 多选）
+      - WX 单选：n_actions = MAX_TARGETS + 1（0=待机，1..N=锁定目标）
+      - LD 多标签：ld_n_actions = MAX_TARGETS（无待机维，逐目标独立 Q，top-20 多选）
 
     Returns:
         {
@@ -218,16 +223,16 @@ def compute_dimensions(n_radars: int, n_satellites: int, n_targets: int) -> dict
             "radar_obs_dim": int, "obs_shape": int, "state_shape": int,
         }
     """
-    n_ld = n_radars
-    n_wx = n_satellites
-    n_agents = n_radars + n_satellites          # 统一骨架：200 LD + 25 WX = 225
-    n_actions = n_targets + 1                   # WX 单选空间（0=待机，1..N=目标）
-    ld_n_actions = n_targets                    # LD 多标签空间（仅目标维）
+    n_ld = MAX_RADARS
+    n_wx = MAX_SATELLITES
+    n_agents = MAX_AGENTS                      # 283 = 200 LD + 83 WX
+    n_actions = MAX_ACTIONS                    # 22（0=待机，1..21=目标）
+    ld_n_actions = MAX_TARGETS                 # 21（LD 多标签空间，仅目标维）
     radar_obs_dim = (
         RADAR_SELF_FEATURES
-        + n_targets * (TARGET_FEATURES + SATELLITE_BROADCAST_FEATURES)
-    )
-    state_dim = (n_targets * TARGET_STATE_FEATURES) + (n_agents * RADAR_STATE_FEATURES) + 1
+        + MAX_TARGETS * (TARGET_FEATURES + SATELLITE_BROADCAST_FEATURES)
+    ) #177
+    state_dim = (MAX_TARGETS * TARGET_STATE_FEATURES) + (MAX_AGENTS * RADAR_STATE_FEATURES) + 1  #1584
 
     dims = {
         "n_agents": n_agents,
@@ -240,7 +245,8 @@ def compute_dimensions(n_radars: int, n_satellites: int, n_targets: int) -> dict
         "state_shape": state_dim,
     }
 
-    print(f"[SceneParser] 维度推导: n_agents={n_agents}(LD={n_ld}, WX={n_wx}), "
+    print(f"[SceneParser] 维度推导(MAX固定槽位): n_agents={n_agents}(LD={n_ld}, WX={n_wx}), "
           f"n_actions={n_actions}(WX单选), ld_n_actions={ld_n_actions}(LD多标签), "
-          f"obs={radar_obs_dim}, state={state_dim}")
+          f"obs={radar_obs_dim}, state={state_dim} | 真实实体: "
+          f"雷达={n_radars}, 卫星={n_satellites}, 目标={n_targets}")
     return dims

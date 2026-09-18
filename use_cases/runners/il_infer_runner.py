@@ -57,7 +57,7 @@ class ILInferRunner:
         if os.path.exists(csv_path) and os.path.getsize(csv_path) > 0:
             return
 
-        agent_keys = self.conf.radar_keys
+        agent_keys = list(self.conf.radar_keys) + list(self.conf.satellites_keys)
         generate_expert_csv(
             conf=self.conf, dest_csv_path=csv_path,
             obs_builder=ObservationBuilder(
@@ -65,10 +65,12 @@ class ILInferRunner:
                 n_agents=self.conf.n_agents, n_targets=self.conf.n_targets,
                 n_actions=self.conf.n_actions,
                 radar_obs_dim=self.conf.radar_obs_dim,
+                satellite_ids=self.conf.satellites_keys,
             ),
             action_mapper=ActionMapper(
                 agent_keys=agent_keys, target_keys=self.conf.target_keys,
                 n_agents=self.conf.n_agents, n_actions=self.conf.n_actions,
+                satellite_keys=self.conf.satellites_keys,
             ),
             plan_id=plan_id, scene_file_path=scene_path,
             radar_keys=self.conf.radar_keys, target_keys=self.conf.target_keys,

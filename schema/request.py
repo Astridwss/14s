@@ -32,6 +32,10 @@ class RLHyperparameters(BaseModel):
     epsilon_finish: Optional[float] = Field(default=None, description="最终随机探索概率")
     epsilon_anneal_time: Optional[int] = Field(default=None, description="探索率退火总步数")
 
+    # 两阶段冻结训练 (phase1 LD 先行 / phase2 WX 解冻)
+    phase1_episodes: Optional[int] = Field(default=None, description="phase1 局数: -1=纯LD标定 / 0=直接联合 / N=第N局切phase2解冻WX")
+    wx_epsilon: Optional[float] = Field(default=None, description="phase2 卫星独立探索率（WX 从零学，给足探索）")
+
     # 神经网络容量 (高级设置)
     drqn_hidden_dim: Optional[int] = Field(default=None, description="单体网络 GRU 隐藏层维度")
     qmix_hidden_dim: Optional[int] = Field(default=None, description="QMIX 混频网络隐藏层维度")

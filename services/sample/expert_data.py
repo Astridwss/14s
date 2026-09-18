@@ -29,6 +29,8 @@ import pymap3d as pm
 from sim.datastruct import (
     AgentObservation, SystemTrackBase, EquipmentState, EquipmentToTargetDetectionResult,
 )
+# 槽位布局唯一真相源（纯常量 + 纯函数，非场景重建逻辑），E 段按槽位读写张量
+from services.scene.scene_constants import build_agent_slot_map
 
 # 父进程 fork 前填充的共享只读数据；子进程经 COW 继承，避免经 Pool 参数 pickle 大对象。
 _G = {}
@@ -76,6 +78,7 @@ def _process_chunk(args):
     target_key_to_idx = _G['target_key_to_idx']
     obs_builder = _G['obs_builder']
     action_mapper = _G['action_mapper']
+    agent_slot = _G['agent_slot']
 
     # 初始化 counts：结算 t_start 之前的事件（保证本块首步激活集合正确）
     counts = {eid: np.zeros(len(equip_ordered[eid]), dtype=np.int32) for eid in all_equips}
@@ -285,22 +288,26 @@ def _process_chunk(args):
             avail_str_rows = avail_actions.astype(str).tolist()   # (n_agents, n_actions)
 
             # E. 提取专家动作 & 掩码校正（雷达 LD + 卫星 WX，统一按 agent_keys 顺序）
-            for agent_idx, equip_id in enumerate(all_equips):
+            # 注意：obs/avail 张量按固定槽位排布，须用 agent_slot[equip_id] 而非 dense 下标读写
+            # （满载 dense==slot；低实体数时卫星 dense 下标 != 槽位）。CSV 的 agent_id 也写槽位，
+            # 这样 ExpertDataset 读回时 all_obs[i, agent_id] 的行号与槽位对齐。
+            for dense_i, equip_id in enumerate(all_equips):
+                slot = agent_slot[equip_id]
                 expert_action = 0
                 for i, c in enumerate(counts[equip_id]):
                     if c > 0:
                         expert_action = target_key_to_idx[equip_ordered[equip_id][i]]
                         break
 
-                if expert_action > 0 and avail_actions[agent_idx, expert_action] == 0.0:
+                if expert_action > 0 and avail_actions[slot, expert_action] == 0.0:
                     expert_action = 0  # 目标在盲区，纠正为待机
 
-                obs_arr_str = "|".join(obs_str_rows[agent_idx])
-                avail_arr_str = "|".join(avail_str_rows[agent_idx])
+                obs_arr_str = "|".join(obs_str_rows[slot])
+                avail_arr_str = "|".join(avail_str_rows[slot])
                 # state 是每步共享的全局状态：ExpertDataset 只读每步首行，其余行写空即可，
                 # 避免 225× 冗余膨胀 CSV（原来每步把同一条 state 重复写 225 遍）。
-                row_state = state_str if agent_idx == 0 else ""
-                writer.writerow([t, agent_idx, expert_action, obs_arr_str, row_state, avail_arr_str])
+                row_state = state_str if dense_i == 0 else ""
+                writer.writerow([t, slot, expert_action, obs_arr_str, row_state, avail_arr_str])
             phase['E_write'] += time.time() - _tE
 
     return dict(phase)
@@ -391,6 +398,9 @@ def generate_expert_csv(conf, dest_csv_path: str,
     # t ⟺ t ∈ [ceil(value_min), floor(value_max)]，据此在 ceil/floor 处登记 +1/-1 事件。
     target_keys_set = set(target_keys)
     all_equips = list(radar_keys) + list(sat_keys or [])
+    # 固定槽位映射：实体 ID → MAX agent 槽位（与 ObservationBuilder / ActionMapper 同一真相源）。
+    # E 段按槽位读写 obs/avail，CSV 的 agent_id 写槽位，保证低实体数时卫星落在正确行。
+    agent_slot = build_agent_slot_map(all_equips, sat_keys)
     equip_ordered = {}   # eid -> 目标 ID 列表（plan_result .items() 顺序，已过滤到 target_keys）
     equip_events = {}    # eid -> {时刻(int): [(目标下标, 增量)]}
     for eid in all_equips:
@@ -418,6 +428,7 @@ def generate_expert_csv(conf, dest_csv_path: str,
         'target_key_to_idx': target_key_to_idx,
         'obs_builder': obs_builder,
         'action_mapper': action_mapper,
+        'agent_slot': agent_slot,
     })
 
     # ── 决定 worker 数 ──

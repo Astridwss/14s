@@ -129,10 +129,12 @@ class ILTrainRunner(BaseRunner):
             agent_keys=agent_keys, target_keys=ec.target_keys,
             n_agents=ec.n_agents, n_targets=ec.n_targets,
             n_actions=ec.n_actions, radar_obs_dim=ec.radar_obs_dim,
+            satellite_ids=ec.satellites_keys,
         )
         action_mapper = ActionMapper(
             agent_keys=agent_keys, target_keys=ec.target_keys,
             n_agents=ec.n_agents, n_actions=ec.n_actions,
+            satellite_keys=ec.satellites_keys,
         )
 
         generate_expert_csv(
