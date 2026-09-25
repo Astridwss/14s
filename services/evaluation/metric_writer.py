@@ -6,12 +6,18 @@
 不是 1 秒时（稀疏/密集），点数 ≠ 秒数，导致覆盖率破百或偏低，且对短航迹目标
 不友好。
 
-本模块在 sim 外重写同一个函数（sim 是冻结内核，只 import 复用其甘特图类，不改动）：
-唯一改动是分母换成**每个目标自身的轨迹时长（首末轨迹点时间差，秒）**，
-与分子同口径。0/1/2/≥3 重那几列 ``vecCovernumCoverage`` 用同一个分母，一并修正。
+本模块在 sim 外重写同一个函数（sim 是冻结内核，只 import 复用其甘特图类，不改动）。
+相对 sim 原实现有三处差异，均为评价口径修正，JSON 顶层结构与字段名保持不变：
 
-其余逻辑（甘特图重叠分析、中断次数、JSON 结构、字段名）与 sim 原实现逐字一致，
-保证前端读到的 ``evalFile`` 结构不变。
+1. 覆盖率分母换成**每个目标自身的轨迹时长（首末轨迹点时间差，秒）**，与分子
+   同口径；0/1/2/≥3 重那几列 ``vecCovernumCoverage`` 用同一分母，一并修正。
+2. ``vecContinuityResult`` 新增 ``dAvgCoverNum``（平均覆盖重数），供指标 3 评分。
+3. ``uiInterruputNum``（中断次数）语义改版：sim 原是「目标级覆盖空隙数」（≥1重
+   时间片之间的洞），本版按新评价口径改为「逐装备跟踪段空隙数求和」——单部装备
+   对目标停-起一次记 1 次中断，再对装备求和（供指标 2 评分）。
+
+其余逻辑（甘特图重叠分析、字段名）与 sim 原实现逐字一致，保证前端读到的
+``evalFile`` 结构不变。
 """
 
 import json
@@ -129,24 +135,38 @@ def write_plan_metric_to_json(
             dict_target_eva_result['vecReliabilityResult'] = []
 
             over_one_cover_time = 0
-            interrupt_num = 0
-            for i, (time_range, lst_equip_id) in enumerate(lst_result_over_one_cover):
+            for time_range, lst_equip_id in lst_result_over_one_cover:
                 over_one_cover_time = over_one_cover_time + time_range.range()
 
-                if i < len(lst_result_over_one_cover) - 1:
-                    if abs(lst_result_over_one_cover[i + 1][0].value_min - time_range.value_max) > 1e-6:
+            # 中断次数（逐装备）：每部装备对目标的跟踪段数 - 1（段间空隙 = 中断），
+            # 再对装备求和。单部装备中途「停→再起」算 1 次中断；两部装备干净交接
+            # （各连续一段）不产生中断。统计口径与覆盖率一致：裁剪到目标轨迹窗口内。
+            interrupt_num = 0
+            for str_equip_id, lst_clipped in gantt_chart.dict_activity.items():
+                intervals = sorted(lst_clipped, key=lambda r: r.value_min)
+                for j in range(len(intervals) - 1):
+                    if intervals[j + 1].value_min - intervals[j].value_max > 1e-6:
                         interrupt_num += 1
 
             # 兜底：裁剪后仍可能因浮点/边界略超，覆盖秒数绝不大于轨迹时长（绝不破百）
             over_one_cover_time = min(over_one_cover_time, target_traj_total_time)
 
+            # 平均覆盖重数：目标轨迹时长内的时间加权平均覆盖重数（精确到每个时间片，
+            # 非 0/1/2/≥3 桶）。覆盖重数评分用（10重满分、少一重扣十分），分母与
+            # 覆盖率同口径（自身轨迹秒数）；未覆盖时段贡献 0 重，已天然计入。
+            full_overlap = gantt_chart.overlapping_analysis_in_total()
+            avg_cover_num = (sum(min(len(names), 10) * r.range() for r, names in full_overlap)
+                             / target_traj_total_time)
+
             # 诊断：打印每个目标的分子/分母，便于在离线机核对口径（秒）与破百根因
             traj_desc = f"[{bounds[0]},{bounds[1]}]" if bounds is not None else "?"
             print(f"[metric_writer] target={str_target_id} traj={traj_desc} "
                   f"denom={target_traj_total_time}s num={over_one_cover_time:.1f}s "
-                  f"rate={over_one_cover_time / target_traj_total_time * 100.0:.2f}% clipped={target_clipped}")
+                  f"rate={over_one_cover_time / target_traj_total_time * 100.0:.2f}% "
+                  f"avgCoverNum={avg_cover_num:.2f} clipped={target_clipped}")
 
             dict_continuity_result = {'dDetectCoverAge': over_one_cover_time / target_traj_total_time * 100.0,
+                                      'dAvgCoverNum': avg_cover_num,
                                       'regionType': 'ENUM_COMPREHENSIVE', 'uiInterruputNum': interrupt_num}
             dict_target_eva_result['vecContinuityResult'].append(dict_continuity_result)
 

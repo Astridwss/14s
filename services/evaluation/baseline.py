@@ -28,6 +28,7 @@ from sim import PlanFileProcess
 
 from services.evaluation.coverage import CoverageSummary, parse_metric_file
 from services.evaluation.metric_writer import write_plan_metric_to_json
+from services.evaluation.metrics import SchemeMetrics
 
 
 @dataclass
@@ -43,6 +44,7 @@ class BaselineArtifacts:
     records_path: str = ""
     metric_path: str = ""
     coverage: Optional[CoverageSummary] = None
+    scores: Optional[dict] = None          # 四指标分 + 加权总分（SchemeMetrics.all_scores）
 
 
 class BaselineEvaluator:
@@ -122,9 +124,9 @@ class BaselineEvaluator:
             dest_path=metric_path,
         )
 
-        summary = parse_metric_file(
-            metric_path, all_target_ids=scene_target_ids(battle_scene),
-        )
+        target_ids = scene_target_ids(battle_scene)
+        summary = parse_metric_file(metric_path, all_target_ids=target_ids)
+        metrics = SchemeMetrics(metric_path, all_target_ids=target_ids)
         print(f"[Baseline] 基线评估产物已生成: {summary.describe()}")
 
         return BaselineArtifacts(
@@ -132,6 +134,7 @@ class BaselineEvaluator:
             records_path=records_path,
             metric_path=metric_path,
             coverage=summary,
+            scores=metrics.all_scores(),
         )
 
 

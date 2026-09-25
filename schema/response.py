@@ -49,6 +49,11 @@ class EvalResultData(BaseModel):
     timeSeriesFile: Optional[str] = None
     evalFile: Optional[str] = None
     coverage: Optional[float] = None
+    targetCoverCount: Optional[float] = None
+    interruptCount: Optional[float] = None
+    coverageMultiplicity: Optional[float] = None
+    trackingCoverage: Optional[float] = None
+    totalScore: Optional[float] = None
     startTime: Optional[str] = None
     endTime: Optional[str] = None
     costTime: Optional[str] = None

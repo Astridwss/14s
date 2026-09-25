@@ -119,19 +119,19 @@ class RewardCalculator:
     不依赖 config 字段顺序，也不随 episode 缓存，避免跨局状态残留。
     """
 
-    # ---- 系数（标定点，与 docs/#4_奖励策略.md §6 一致；K 与旧 _switch_penalty 保持 K=4）----
-    K = 4                                   # 冗余容忍上限
-    MISS_PENALTY = 20.0                     # R_miss      可见却 0 锁
-    COVER_REWARD = 2.0                      # R_cover     可见 >=1 锁（每目标一次，不随锁数增长）
+    # ---- 系数（v4：对齐四指标加权 10/10/60/20；耗能非主指标 → 超重中性、无冗余罚）----
+    K = 10                                  # 满分覆盖重数（=评价指标 10 重满分；兼作 switch 纠错豁免阈值）
+    MULT_W = 1.0                            # R_mult      覆盖重数每重奖励（60% 主导，线性到 K 封顶）
+    MISS_PENALTY = 20.0                     # R_miss      可见却 0 锁（覆盖率 20%）
     VALID_PENALTY = 5.0                     # R_valid     锁不可见
-    REDUNDANT_PENALTY = 5.0                 # R_redundant 线性（超 K 每部 -5）
-    EDGE_PENALTY = 2.0                      # R_edge      每个边缘锁定（替代 R_danger / R_relay）
+    EDGE_PENALTY = 2.0                      # R_edge      每个边缘锁定（交给卫星）
+    SWITCH_PENALTY = 8.0                    # R_switch    逐装备掉锁（中断 10%，v3=5 → 8 加重）
+    GAP_PENALTY = 15.0                      # R_gap       目标覆盖 >0→0 的硬中断（最重，护栏②门控）
     WX_BLIND_BASE = 4.0                     # R_wx_blind  补盲底分
     WX_GAP_WEIGHT = 2.0                     # R_wx_blind  gap 衰减权重
     WX_HANDOFF_REWARD = 3.0                 # R_wx_handoff 预警
     WX_VALID_PENALTY = 5.0                  # R_wx_valid  瞎指
     WX_IDLE_PENALTY = 1.0                   # R_wx_idle   机会成本
-    SWITCH_PENALTY = 2.0                    # R_switch    槽位级切换
     EDGE_RATIO = 0.85                       # 边缘判定阈值（distance > ratio * range_max）
 
     def __init__(self, agent_keys: List[str], target_keys: List[str],
@@ -147,25 +147,27 @@ class RewardCalculator:
     # 入口
     # ============================================================
 
-    def compute_reward(self, raw_obs, actions_onehot, prev_onehot) -> float:
-        """单步奖励 = R_ld + R_wx + R_switch。
+    def compute_reward(self, raw_obs, actions_onehot, prev_onehot, done: bool = False) -> float:
+        """单步奖励 = R_ld + R_wx + R_switch（终态 done 跳过 R_switch）。
 
         Args:
             raw_obs:        AgentObservation（含 dict_detection_result / dict_equip_state
                             / dict_system_track），为 step_forward 后的当前帧观测。
             actions_onehot: (n_agents, n_actions) 多标签 one-hot，当前步动作。
             prev_onehot:    (n_agents, n_actions) 或 None，上一步动作（None = 首步无切换）。
+            done:           本步是否为终态（terminated/truncated）。终态覆盖归零是
+                            局结束而非智能体选择，跳过中断/掉锁结算（护栏①）。
         """
-        total, _ = self.compute_reward_detailed(raw_obs, actions_onehot, prev_onehot)
+        total, _ = self.compute_reward_detailed(raw_obs, actions_onehot, prev_onehot, done=done)
         return total
 
-    def compute_reward_detailed(self, raw_obs, actions_onehot, prev_onehot):
+    def compute_reward_detailed(self, raw_obs, actions_onehot, prev_onehot, done: bool = False):
         """单步奖励 + 分项明细，返回 (total, breakdown)。
 
         breakdown: {指标名: {"value": float, "count": int}}，指标名：
-            ld_miss / ld_cover / ld_valid / ld_edge / ld_redundant
+            ld_miss / ld_mult / ld_valid / ld_edge
             wx_blind / wx_handoff / wx_valid / wx_idle（wx_enabled 时）
-            switch_penalty
+            switch_penalty / switch_gap（非终态时）
         value 为该项净贡献（count×系数），count 为触发次数。
         """
         radar_ids, sat_ids = _split_agents(self.agent_keys, raw_obs.dict_equip_state)
@@ -178,7 +180,10 @@ class RewardCalculator:
         streams = [self._r_ld(raw_obs, actions_onehot, radar_ids, edge_map)]
         if self.wx_enabled:
             streams.append(self._r_wx(raw_obs, actions_onehot, radar_ids, sat_ids, edge_map))
-        streams.append(self._r_switch(raw_obs, actions_onehot, prev_onehot))
+        # 护栏①：终态不结算中断/掉锁。否则最后一步所有目标覆盖归零，会吃一记
+        # 巨额 -GAP×目标数 的过失惩罚（归零是局结束造成的，非智能体选择）。
+        if not done:
+            streams.append(self._r_switch(raw_obs, actions_onehot, prev_onehot, edge_map))
         for _val, _bd in streams:
             total += _val
             breakdown.update(_bd)
@@ -214,18 +219,18 @@ class RewardCalculator:
                 else:
                     stream.add("valid", -self.VALID_PENALTY)     # R_valid 锁不可见
 
-        # 3) 逐目标：R_miss / R_cover / R_edge / R_redundant
+        # 3) 逐目标：R_miss / R_mult / R_edge
         for t, able in visible.items():
             locked = locks.get(t, [])
             n_lock = len(locked)
             if n_lock == 0:
                 stream.add("miss", -self.MISS_PENALTY)           # R_miss
                 continue
-            stream.add("cover", self.COVER_REWARD)               # R_cover
+            # R_mult：覆盖重数线性到 K 封顶（60% 主导）。超 K 中性——耗能非主指标，
+            # 评价指标 min(重数,10) 封顶，>10 不奖不罚，故不再设 R_redundant。
+            stream.add("mult", self.MULT_W * min(n_lock, self.K))
             edge = sum(1 for r in locked if able.get(r, False))
             stream.add("edge", -self.EDGE_PENALTY, edge)         # R_edge
-            if n_lock > self.K:
-                stream.add("redundant", -self.REDUNDANT_PENALTY, n_lock - self.K)  # R_redundant
 
         return stream.result()
 
@@ -284,7 +289,7 @@ class RewardCalculator:
     # R_switch 槽位级切换惩罚
     # ============================================================
 
-    def _r_switch(self, raw_obs, actions_onehot, prev_onehot):
+    def _r_switch(self, raw_obs, actions_onehot, prev_onehot, edge_map):
         stream = _RewardStream("switch")
         if prev_onehot is None:
             return stream.result()
@@ -294,8 +299,19 @@ class RewardCalculator:
         if prev.shape != cur.shape:
             return stream.result()
 
-        # 上一步每个目标的锁定数（按目标统计，超冗余甩掉属纠错不罚）
+        # 上一步 / 当前步每个目标的锁定数（按目标统计，超冗余甩掉属纠错不罚）
         prev_count = prev.sum(axis=0)
+        cur_count = cur.sum(axis=0)
+
+        # R_gap：目标覆盖从 >0 归零（硬中断，最重）。护栏②：仅当目标仍可见
+        # （= 仍在 edge_map 中，即仍被 ≥1 部雷达 detectable）才罚——轨迹窗结束 /
+        # 飞出射程导致的归零是被迫的，不计。终态由护栏①（done 不进入本流）兜底。
+        for b in range(cur_count.shape[0]):
+            if b < 1 or b > len(self.target_keys):
+                continue
+            target_id = self.target_keys[b - 1]
+            if prev_count[b] > 0 and cur_count[b] == 0 and target_id in edge_map:
+                stream.add("gap", -self.GAP_PENALTY)
 
         n = min(prev.shape[0], len(self.agent_keys))
         for i in range(n):

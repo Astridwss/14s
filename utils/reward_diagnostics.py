@@ -12,22 +12,23 @@
 用法（独立跑一局，ε 可控）:
     from utils.reward_diagnostics import diagnose_episode
     diagnose_episode(env, agents, epsilon=0.0)
-
-# ---- 实体数与单步奖励的量化关系（系数见 RewardCalculator 类属性）----
-设  N_r=雷达数(LD)  N_s=卫星数(WX)  N_t=目标数  T=每局步数；
-    每步可见目标数 V_vis，覆盖(≥1锁)目标数 C，漏警 M=V_vis-C；
-    E=边缘锁定次数  Red=冗余锁定次数  V=瞎指锁定次数  S=切换惩罚次数。
-
-    单步 R_ld      = 1.5C - 20M - 2E - 5V - R_redundant
-    R_redundant   = 8·soft + 20·heavy，其中 soft=min(超K部,2)、heavy=超K部-soft（阶梯）
-    单步 R_wx      = Σ卫星项，每部卫星 ∈ [-5, +6]
-    单步 R_switch  = -2S，且 0 ≤ S ≤ 4·N_t（K=4 门控）
-
-    R_episode = Σ_{t=1..T} (R_ld + R_wx + R_switch)
-
-    盈亏平衡(仅 R_ld，忽略 E/Red/V/S)：  C / V_vis ≥ MISS/(MISS+COVER) = 20/21.5 ≈ 0.930
-    即：覆盖每步可见目标的 ≥93% 才能打平；叠加边缘/瞎指/切换后，要求更高。
 """
+
+# ---- 实体数与单步奖励的量化关系（系数见 RewardCalculator 类属性，v4）----
+# 设  N_r=雷达数(LD)  N_s=卫星数(WX)  N_t=目标数  T=每局步数；
+#     每步可见目标数 V_vis，覆盖(≥1锁)目标数 C，漏警 M=V_vis-C；
+#     E=边缘锁定次数  V=瞎指锁定次数  S=切换惩罚次数  G=覆盖归零次数；
+#     Mult=Σ_t min(n_lock(t), K)（覆盖重数，K=10）。
+#
+#     单步 R_ld      = MULT_W·Mult - 20M - 2E - 5V   （覆盖重数线性到10封顶，超重中性）
+#     单步 R_wx      = Σ卫星项，每部卫星 ∈ [-5, +6]
+#     单步 R_switch  = -8S - 15G   （中断 10%；终态 done 不结算）
+#
+#     R_episode = Σ_{t=1..T} (R_ld + R_wx + R_switch)
+#
+#     覆盖重数 R_mult 是主导项（对齐评价指标 60% 权重）：每个目标 1→10 重线性加分，
+#     >10 不奖不罚（耗能非主指标，不再设冗余罚）。中断 R_switch/R_gap 加重，呼应
+#     「极重视极小中断次数」。
 
 import numpy as np
 
@@ -35,15 +36,15 @@ import numpy as np
 # 分项打印顺序与中文名（与 reward.py 原生 breakdown key 一一对应）
 _COLS = [
     ("ld_miss", "雷达漏警"),
-    ("ld_cover", "雷达覆盖"),
+    ("ld_mult", "覆盖重数"),
     ("ld_valid", "雷达瞎指"),
     ("ld_edge", "雷达边缘"),
-    ("ld_redundant", "雷达冗余"),
     ("wx_blind", "卫星补盲"),
     ("wx_handoff", "卫星预警"),
     ("wx_valid", "卫星瞎指"),
     ("wx_idle", "卫星空耗"),
     ("switch_penalty", "槽位切换"),
+    ("switch_gap", "覆盖归零"),
 ]
 
 

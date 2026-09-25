@@ -112,15 +112,18 @@ class GroupedEnvWrapper:
         raw_obs, sim_terminated = self._sim.step_forward(agent_actions)
         self._current_time = raw_obs.current_time
 
-        # 新奖励：R_ld + R_wx + R_switch（替换 sim.generate_reward + _switch_penalty）
+        terminated = bool(sim_terminated)  # 自然结束：current_time > _end_tim
+        truncated = bool(self._step_count >= self._max_episode_steps)
+
+        # 新奖励：R_ld + R_wx + R_switch（替换 sim.generate_reward + _switch_penalty）。
+        # 终态 done=True 跳过中断/掉锁结算（护栏①），避免局结束导致覆盖归零的过失惩罚。
         reward, reward_breakdown = self._reward_calc.compute_reward_detailed(
             raw_obs=raw_obs,
             actions_onehot=actions,
             prev_onehot=self._prev_actions,
+            done=(terminated or truncated),
         )
         self._prev_actions = np.asarray(actions).copy()
-        terminated = bool(sim_terminated)  # 自然结束：current_time > _end_tim
-        truncated = bool(self._step_count >= self._max_episode_steps)
 
         # TXL卫星视场覆盖（仅绘制补充，不参与训练；旁路异常不影响主流程）
         try:

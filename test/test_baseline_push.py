@@ -34,7 +34,7 @@ import requests
 from sim import PlanFileProcess
 from sim.datastruct import AgentActionCommand
 from services.evaluation import (
-    BaselineEvaluator, parse_metric_file, scene_target_ids,
+    BaselineEvaluator, parse_metric_file, scene_target_ids, write_plan_metric_to_json,
 )
 from use_cases.pusher import Pusher
 
@@ -158,11 +158,16 @@ def step2_fake_inference(battle_scene):
     )
 
     processor.write_model_inference_result_to_json(
-        dict_model_inference_result=stream, dest_path=records_path,
-    )
-    processor.write_model_inference_metric_to_json(
         dict_model_inference_result=stream, battle_scene=battle_scene,
-        dest_path=metric_path,
+        dest_path=records_path,
+    )
+    # 指标文件改用 sim 外重写版（分母=轨迹时长 + 平均覆盖重数 dAvgCoverNum），
+    # 与线上推理 eval_runner 同路径，且与基线(metric_writer)在 JSON 结构上同构。
+    plan_result = processor.write_model_inference_result_to_plan_result(
+        dict_model_inference_result=stream, battle_scene=battle_scene,
+    )
+    write_plan_metric_to_json(
+        plan_result=plan_result, battle_scene=battle_scene, dest_path=metric_path,
     )
 
     summary = parse_metric_file(metric_path, scene_target_ids(battle_scene))

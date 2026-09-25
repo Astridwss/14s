@@ -4,7 +4,7 @@ algorithm: qmix  # 默认算法（后端 API 会根据请求动态覆盖这个�
 # 公共参数 (Common)
 common:
   seed: 42
-  device: cpu
+  device: npu
   time_step: 5                  # 仿真时间步长（秒）：2600s 场景 ÷ 5 = 520 步/局
 
 # ==========================================
@@ -14,8 +14,8 @@ qmix:
   learning_rate: 0.0005      # 针对 200 智能体稍微放大
   gamma: 0.995                # 影响 γ（折扣因子）控制未来奖励打多大折扣，直接出现在 TD target 里 - γ 越大 → 越"远视"，未来奖励几乎和当下等价；γ 越小 → 越"近视"，只认眼前。      
   #  target = reward_now + γ · (1 - terminated) · Q_target(下一状态)
-  batch_size: 32             
-  buffer_size: 2000          
+  batch_size: 32     #128          
+  buffer_size: 2000         #4000 
   update_target_params: 200  #每 update_target_params 步，把 target 网络整表复制成 eval 网络。target 一跳，TD target r + γ·Q_targ 就跳，loss 就跟着跳一次。这不是损失函数写错了，是算法设计如此。
   grad_norm_clip: 10.0       
   
@@ -65,9 +65,9 @@ drqn:
 # 训练全局控制 (Train 模式公共配置)
 train:
   max_episodes: 5000             # RL 默认训练回合数
-  rl_num_workers: 1             # RL 并行环境采样 worker 数（>1 启用多进程 rollout；按机器 CPU 核数调，可被环境变量 NUM_ENV_WORKERS 覆盖）
-  utd_ratio: 1                   # UTD 比：每新采 1 局做几次梯度更新（replay 复用，喂饱 GPU；1=原行为，4~8 常用）
-  il_num_workers: 1              # IL 数据加载并行进程数（DataLoader num_workers；独立于 RL 的 env 采样 num_workers；Windows 开发机报错可设 0）
+  rl_num_workers: 1             # RL 并行环境采样 worker 数（>1 启用多进程 rollout；按机器 CPU 核数调，可被环境变量 NUM_ENV_WORKERS 覆盖） 16
+  utd_ratio: 1                   # UTD 比：每新采 1 局做几次梯度更新（replay 复用，喂饱 GPU；1=原行为，4~8 常用） 4
+  il_num_workers: 1              # IL 数据加载并行进程数（DataLoader num_workers；独立于 RL 的 env 采样 num_workers；Windows 开发机报错可设 0） 8
   expert_csv_workers: 8           # IL 专家数据生成多进程数（按时间步切分并行；1=串行原行为，0=自动 min(cpu,8)）
   load_dir: "./load_dir"
   epochs: 50                     # IL 默认训练轮数

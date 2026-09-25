@@ -5,16 +5,19 @@ action / state / reward），面向 step 循环；本包面向**整局方案产�
 被推演 Runner、离线对比脚本共用。
 
 覆盖率口径统一在 :mod:`services.evaluation.coverage`，基线 A（专家预案）
-的生成在 :mod:`services.evaluation.baseline`。
+的生成在 :mod:`services.evaluation.baseline`，四指标加权评分体系在
+:mod:`services.evaluation.metrics`。
 """
 
 from services.evaluation.coverage import CoverageSummary, parse_metric_file
 from services.evaluation.metric_writer import write_plan_metric_to_json
+from services.evaluation.metrics import SchemeMetrics
 from services.evaluation.baseline import (
     BaselineArtifacts, BaselineEvaluator, scene_target_ids,
 )
 
 __all__ = [
     "CoverageSummary", "parse_metric_file", "write_plan_metric_to_json",
+    "SchemeMetrics",
     "BaselineArtifacts", "BaselineEvaluator", "scene_target_ids",
 ]

@@ -25,7 +25,7 @@ from services.algorithms.qmix.agent import Agents
 from services.sample.rollout import RolloutWorker
 from services.scene.grouping import RadarGrouper
 from services.evaluation import (
-    BaselineEvaluator, parse_metric_file, scene_target_ids, write_plan_metric_to_json,
+    BaselineEvaluator, SchemeMetrics, scene_target_ids, write_plan_metric_to_json,
 )
 from sim import PlanFileProcess
 from utils.weight_naming import build_weight_prefix
@@ -313,9 +313,11 @@ class EvalRunner(BaseRunner):
     # 结果字段组装
     # ============================================================
     def _build_eval_fields(self, metric_abs_path, start_time, end_time, cost_seconds):
-        """计算推演覆盖率与耗时字段，返回 dict 供 run() 组装 HTTP 响应体。
+        """计算推演评估字段，返回 dict 供 run() 组装 HTTP 响应体。
 
-        coverage —— 全量目标算术平均覆盖率(%)，与基线侧同分母、同口径。
+        除耗时字段外，含四指标分 + 最后得分（totalScore）：
+        coverage(=trackingCoverage 跟踪覆盖率，向后兼容) / targetCoverCount(目标覆盖数) /
+        interruptCount(中断次数) / coverageMultiplicity(覆盖重数) / totalScore。
         """
         fields = {
             "startTime": _fmt_time(start_time),  #预案生成开始时间（可读）
@@ -323,8 +325,15 @@ class EvalRunner(BaseRunner):
             "costTime": _fmt_duration(cost_seconds),  #预案总耗时（可读）
         }
 
-        summary = parse_metric_file(metric_abs_path, self._all_target_ids())
-        fields["coverage"] = summary.coverage
+        metrics = SchemeMetrics(metric_abs_path, all_target_ids=self._all_target_ids())
+        scores = metrics.all_scores()
+        # coverage 保持向后兼容 = 跟踪覆盖率（即原覆盖率口径）
+        fields["coverage"] = scores["tracking_coverage"]
+        fields["targetCoverCount"] = scores["target_cover_count"]
+        fields["interruptCount"] = scores["interrupt_count"]
+        fields["coverageMultiplicity"] = scores["coverage_multiplicity"]
+        fields["trackingCoverage"] = scores["tracking_coverage"]
+        fields["totalScore"] = scores["weighted_score"]
         return fields
 
     # ============================================================
@@ -455,10 +464,10 @@ class BaselineEvalRunner(BaseRunner):
     def _build_baseline_fields(self):
         """生成专家预案基线并返回基线字段 dict，供 run() 组装 HTTP 响应体。
 
-        返回:
-            {"baselineTimeSeriesFile": records_path,
-             "baselineEvalFile": metric_path,
-             "baselineCoverage": coverage.coverage}
+        返回（与推理侧同字段名，另加四指标 + 最后得分）:
+            timeSeriesFile / evalFile / coverage(=trackingCoverage) /
+            targetCoverCount / interruptCount / coverageMultiplicity /
+            trackingCoverage / totalScore
 
         失败/不可用时字段为 None——基线是旁路能力，任何异常都不应中断主流程，
         故整段兜底捕获。键集只声明一次：默认全 None，成功后原地覆盖对应值。
@@ -467,6 +476,11 @@ class BaselineEvalRunner(BaseRunner):
             "timeSeriesFile": None,
             "evalFile": None,
             "coverage": None,
+            "targetCoverCount": None,
+            "interruptCount": None,
+            "coverageMultiplicity": None,
+            "trackingCoverage": None,
+            "totalScore": None,
         }
         try:
             plan_file_info = self._load_plan_file_info()
@@ -487,4 +501,10 @@ class BaselineEvalRunner(BaseRunner):
         fields["timeSeriesFile"] = artifacts.records_path
         fields["evalFile"] = artifacts.metric_path
         fields["coverage"] = artifacts.coverage.coverage
+        if artifacts.scores:
+            fields["targetCoverCount"] = artifacts.scores["target_cover_count"]
+            fields["interruptCount"] = artifacts.scores["interrupt_count"]
+            fields["coverageMultiplicity"] = artifacts.scores["coverage_multiplicity"]
+            fields["trackingCoverage"] = artifacts.scores["tracking_coverage"]
+            fields["totalScore"] = artifacts.scores["weighted_score"]
         return fields

@@ -10,7 +10,7 @@
       └─ {"schemeEvaResult": [
              {"vecTargetEvaResult": [
                  {"strTargetID": "7016",
-                  "vecContinuityResult":  [{"dDetectCoverAge": 63.4, "uiInterruputNum": 2}],
+                  "vecContinuityResult":  [{"dDetectCoverAge": 63.4, "uiInterruputNum": 2, "dAvgCoverNum": 2.3}],
                   "vecReliabilityResult": [{"vecCovernumCoverage": [...]}]}
              ]}
          ]}
@@ -35,6 +35,7 @@ class CoverageSummary:
     n_targets_scored: int = 0                               # 指标文件中实际出现的目标数
     per_target: Dict[str, float] = field(default_factory=dict)      # 每目标覆盖率，%
     interrupts: Dict[str, int] = field(default_factory=dict)        # 每目标中断次数
+    avg_cover_num: Dict[str, float] = field(default_factory=dict)   # 每目标平均覆盖重数（dAvgCoverNum）
 
     @property
     def n_targets_missing(self) -> int:
@@ -64,7 +65,7 @@ def parse_metric_file(
         CoverageSummary；文件缺失或结构异常时返回全 0 的空汇总（不抛异常，
         由调用方按 ``n_targets_scored == 0`` 判断是否可用）。
     """
-    per_target, interrupts = _read_per_target(metric_path)
+    per_target, interrupts, avg_cover_num = _read_per_target(metric_path)
 
     if all_target_ids is None:
         denominator = list(per_target.keys())
@@ -75,6 +76,7 @@ def parse_metric_file(
     if n_total == 0:
         return CoverageSummary(
             per_target=per_target, interrupts=interrupts,
+            avg_cover_num=avg_cover_num,
             n_targets_scored=len(per_target),
         )
 
@@ -84,9 +86,10 @@ def parse_metric_file(
     return CoverageSummary(
         coverage=round(total / n_total, 4),
         n_targets_total=n_total,
-        n_targets_scored=sum(1 for tid in denominator if tid in per_target),
+        n_targets_scored=sum(1 for tid in denominator if tid in per_target and per_target.get(tid) > 1e-3),
         per_target=per_target,
         interrupts=interrupts,
+        avg_cover_num=avg_cover_num,
     )
 
 
@@ -95,17 +98,17 @@ def parse_metric_file(
 # ============================================================
 
 def _read_per_target(metric_path: str):
-    """从指标文件抽取 {目标ID: 覆盖率%} 与 {目标ID: 中断次数}。"""
+    """从指标文件抽取 {目标ID: 覆盖率%}、{目标ID: 中断次数}、{目标ID: 平均覆盖重数}。"""
     if not metric_path or not os.path.exists(metric_path):
         print(f"[Coverage] 指标文件不存在，覆盖率按空处理: {metric_path}")
-        return {}, {}
+        return {}, {}, {}
 
     try:
         with open(metric_path, "r", encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, ValueError) as e:
         print(f"[Coverage] 指标文件读取失败: {metric_path} - {e}")
-        return {}, {}
+        return {}, {}, {}
 
     scheme = data.get("schemeEvaluteResult") if isinstance(data, dict) else None
     # sim 落盘时把内层 dump 成字符串，这里兼容 str / dict 两种形态
@@ -114,13 +117,14 @@ def _read_per_target(metric_path: str):
             scheme = json.loads(scheme)
         except ValueError as e:
             print(f"[Coverage] schemeEvaluteResult 解析失败: {e}")
-            return {}, {}
+            return {}, {}, {}
     if not isinstance(scheme, dict):
         print(f"[Coverage] 指标文件缺少 schemeEvaluteResult: {metric_path}")
-        return {}, {}
+        return {}, {}, {}
 
     per_target: Dict[str, float] = {}
     interrupts: Dict[str, int] = {}
+    avg_cover_num: Dict[str, float] = {}
 
     for eva_result in scheme.get("schemeEvaResult") or []:
         for target_eva in (eva_result or {}).get("vecTargetEvaResult") or []:
@@ -136,9 +140,11 @@ def _read_per_target(metric_path: str):
             try:
                 per_target[target_id] = float(record.get("dDetectCoverAge", 0.0))
                 interrupts[target_id] = int(record.get("uiInterruputNum", 0))
+                avg_cover_num[target_id] = float(record.get("dAvgCoverNum", 0.0))
             except (TypeError, ValueError):
                 print(f"[Coverage] 目标 {target_id} 覆盖率字段异常，按 0 处理")
                 per_target[target_id] = 0.0
                 interrupts[target_id] = 0
+                avg_cover_num[target_id] = 0.0
 
-    return per_target, interrupts
+    return per_target, interrupts, avg_cover_num
