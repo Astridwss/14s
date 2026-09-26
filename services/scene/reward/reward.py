@@ -121,7 +121,8 @@ class RewardCalculator:
 
     # ---- 系数（v4：对齐四指标加权 10/10/60/20；耗能非主指标 → 超重中性、无冗余罚）----
     K = 10                                  # 满分覆盖重数（=评价指标 10 重满分；兼作 switch 纠错豁免阈值）
-    MULT_W = 1.0                            # R_mult      覆盖重数每重奖励（60% 主导，线性到 K 封顶）
+    MULT_W = 1.0                            # R_mult      覆盖重数每重奖励（60% 主导，线性到 MULT_CAP 封顶）
+    MULT_CAP = 10                           # R_mult 封顶重数；None 或 ≤0 = 不封顶（「能看尽看」去封顶开关）
     MISS_PENALTY = 20.0                     # R_miss      可见却 0 锁（覆盖率 20%）
     VALID_PENALTY = 5.0                     # R_valid     锁不可见
     EDGE_PENALTY = 2.0                      # R_edge      每个边缘锁定（交给卫星）
@@ -132,13 +133,19 @@ class RewardCalculator:
     WX_HANDOFF_REWARD = 3.0                 # R_wx_handoff 预警
     WX_VALID_PENALTY = 5.0                  # R_wx_valid  瞎指
     WX_IDLE_PENALTY = 1.0                   # R_wx_idle   机会成本
+    WX_SEE_ALL_REWARD = 1.0                 # R_wx_see_all 能看尽看：舒适目标也跟踪（去耗能约束，< handoff 3 保持盲区/边缘优先）
     EDGE_RATIO = 0.85                       # 边缘判定阈值（distance > ratio * range_max）
 
     def __init__(self, agent_keys: List[str], target_keys: List[str],
-                 wx_enabled: bool = True, satellite_keys: Optional[List[str]] = None):
+                 wx_enabled: bool = True, satellite_keys: Optional[List[str]] = None,
+                 mult_cap: Optional[int] = None, wx_see_all: bool = False):
         self.agent_keys = list(agent_keys)
         self.target_keys = list(target_keys)
         self.wx_enabled = wx_enabled  # phase1（纯 LD 标定）置 False，屏蔽 R_wx
+        # R_mult 封顶重数：None 沿用类属性 MULT_CAP；显式传 0/负数 = 去封顶（能看尽看）
+        self.mult_cap = self.MULT_CAP if mult_cap is None else mult_cap
+        # WX 能看尽看：True = 卫星空闲时也跟踪舒适/冗余目标（去耗能约束），False = 现状只补盲/预警
+        self.wx_see_all = wx_see_all
         # 可变实体数泛化：动作张量按固定槽位排布，读 actions 用「实体 ID → 槽位」而非 dense 下标
         # （满载两者一致；低实体数时卫星 dense 下标 != 槽位，见 build_agent_slot_map）。
         self._agent_slot = build_agent_slot_map(self.agent_keys, satellite_keys)
@@ -226,9 +233,11 @@ class RewardCalculator:
             if n_lock == 0:
                 stream.add("miss", -self.MISS_PENALTY)           # R_miss
                 continue
-            # R_mult：覆盖重数线性到 K 封顶（60% 主导）。超 K 中性——耗能非主指标，
+            # R_mult：覆盖重数线性到 MULT_CAP 封顶（60% 主导）。超封顶中性——耗能非主指标，
             # 评价指标 min(重数,10) 封顶，>10 不奖不罚，故不再设 R_redundant。
-            stream.add("mult", self.MULT_W * min(n_lock, self.K))
+            # MULT_CAP ≤ 0 时去封顶：重数无上限线性奖励（「能看尽看」，不再压制冗余堆锁）。
+            n_eff = n_lock if (self.mult_cap is None or self.mult_cap <= 0) else min(n_lock, self.mult_cap)
+            stream.add("mult", self.MULT_W * n_eff)
             edge = sum(1 for r in locked if able.get(r, False))
             stream.add("edge", -self.EDGE_PENALTY, edge)         # R_edge
 
@@ -272,8 +281,13 @@ class RewardCalculator:
             if t is not None and (t not in seen or not seen[t].detectable_flag):
                 stream.add("valid", -self.WX_VALID_PENALTY)     # R_wx_valid 瞎指
                 continue
-            if t not in useful:                                 # 空槽或锁了舒适/无用目标
-                if useful:
+            if t not in useful:                                 # 空槽(待机) 或 锁了舒适/无用目标
+                if self.wx_see_all and t is not None:
+                    # 能看尽看：舒适目标（雷达已覆盖 / 可能已被别的卫星跟踪）也去跟踪，
+                    # 充分利用卫星、不设耗能约束。给小额奖励替代 idle 惩罚，
+                    # 仍低于 blind(+4~6) / handoff(+3)，盲区/边缘优先级不变。
+                    stream.add("see_all", self.WX_SEE_ALL_REWARD)
+                elif useful:
                     stream.add("idle", -self.WX_IDLE_PENALTY)   # R_wx_idle
                 continue
             if t not in radar_visible:                          # 盲区目标

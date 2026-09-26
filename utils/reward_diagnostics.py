@@ -43,6 +43,7 @@ _COLS = [
     ("wx_handoff", "卫星预警"),
     ("wx_valid", "卫星瞎指"),
     ("wx_idle", "卫星空耗"),
+    ("wx_see_all", "卫星看尽看"),
     ("switch_penalty", "槽位切换"),
     ("switch_gap", "覆盖归零"),
 ]

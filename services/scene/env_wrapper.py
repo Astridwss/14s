@@ -15,7 +15,7 @@ from services.scene.action.mapper import ActionMapper
 from services.scene.state.builder import ObservationBuilder
 from services.scene.state.satellite_draw import compute_satellite_fov_targets
 from services.scene.reward import RewardCalculator
-from use_cases.config.config_types import EnvConfig
+from use_cases.config.config_types import EnvConfig, _get
 
 
 class GroupedEnvWrapper:
@@ -67,6 +67,8 @@ class GroupedEnvWrapper:
             agent_keys=agent_keys,
             target_keys=ec.target_keys,
             satellite_keys=list(satellite_keys),
+            mult_cap=_get(conf, 'mult_reward_cap', None),
+            wx_see_all=_get(conf, 'wx_see_all', False),
         )
 
     @property

@@ -156,3 +156,94 @@ class SatelliteFovCalculation:
 
         return in_fov_indices
 
+    # 判断目标是否能够被低轨卫星对空相机探测
+    def judge_target_can_be_detected_by_low_orbit_satellite_air_camera(self,
+                                                                       sat_current_geo_pos: np.ndarray,
+                                                                       ele_min: float,
+                                                                       ele_max: float,
+                                                                       target_geo_pos: np.ndarray,
+                                                                       sat_last_geo_pos: np.ndarray = None
+                                                                       ) -> bool:
+        # Step 1：转换为ECEF坐标
+        sat_current_ecef = self.ecef_from_geodetic(*sat_current_geo_pos)
+        target_current_ecef = self.ecef_from_geodetic(*target_geo_pos)
+        center_ecef = np.array([0.0, 0.0, 0.0])
+
+        # Step 2：默认相机指向地心，计算相机光轴方向
+        actual_axis = self.normalize(center_ecef - sat_current_ecef)
+
+        # Step 3：建立相机坐标系旋转矩阵
+        ref_vec = None
+        if sat_last_geo_pos is not None:
+            sat_last_ecef = self.ecef_from_geodetic(*sat_last_geo_pos)
+            ref_vec = sat_current_ecef - sat_last_ecef
+            norm_ref_vec = np.linalg.norm(ref_vec)
+            if norm_ref_vec > 1e-12:
+                ref_vec = ref_vec / norm_ref_vec
+
+        r_matrix = self.build_camera_frame_from_axis(actual_axis, ref_vec)
+
+        # Step 4：计算目标是否在视场角内
+        if self.is_earth_occluded(sat_current_ecef, target_geo_pos):
+            return False
+        else:
+            vec_ecef = target_current_ecef - sat_current_ecef
+            vec_cam = self.apply_rotation(r_matrix, vec_ecef)
+
+            x, y, z = vec_cam
+            ele_radians = math.atan2(y, z)
+            ele_degrees = np.degrees(ele_radians)
+            if 90.0 + ele_min <= abs(ele_degrees) <= 90.0 + ele_max:
+                return True
+            else:
+                return False
+
+    # 判断目标是否能够被卫星对地相机探测
+    def judge_target_can_be_detected_by_satellite_ground_camera(self,
+                                                                sat_current_geo_pos: np.ndarray,
+                                                                azi_min: float,
+                                                                azi_max: float,
+                                                                ele_min: float,
+                                                                ele_max: float,
+                                                                target_geo_pos: np.ndarray,
+                                                                sat_last_geo_pos: np.ndarray = None
+                                                                ) -> bool:
+        # Step 1：转换为ECEF坐标
+        sat_current_ecef = self.ecef_from_geodetic(*sat_current_geo_pos)
+        target_current_ecef = self.ecef_from_geodetic(*target_geo_pos)
+        center_ecef = np.array([0.0, 0.0, 0.0])
+
+        # Step 2：默认相机指向地心，计算相机光轴方向
+        actual_axis = self.normalize(center_ecef - sat_current_ecef)
+
+        # Step 3：建立相机坐标系旋转矩阵
+        ref_vec = None
+        if sat_last_geo_pos is not None:
+            sat_last_ecef = self.ecef_from_geodetic(*sat_last_geo_pos)
+            ref_vec = sat_current_ecef - sat_last_ecef
+            norm_ref_vec = np.linalg.norm(ref_vec)
+            if norm_ref_vec > 1e-12:
+                ref_vec = ref_vec / norm_ref_vec
+
+        r_matrix = self.build_camera_frame_from_axis(actual_axis, ref_vec)
+
+        # Step 4：计算目标是否在视场角内
+        if self.is_earth_occluded(sat_current_ecef, target_geo_pos):
+            return False
+        else:
+            vec_ecef = target_current_ecef - sat_current_ecef
+            vec_cam = self.apply_rotation(r_matrix, vec_ecef)
+
+            x, y, z = vec_cam
+            if z <= 0:
+                return False
+
+            azi_radians = math.atan2(x, z)
+            ele_radians = math.atan2(y, z)
+            azi_degrees = np.degrees(azi_radians)
+            ele_degrees = np.degrees(ele_radians)
+
+            if azi_min <= azi_degrees <= azi_max and ele_min <= ele_degrees <= ele_max:
+                return True
+            else:
+                return False

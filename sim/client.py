@@ -6,7 +6,7 @@ from collections import defaultdict  #20260821
 
 from .datastruct import (
     SystemTrackBase, EquipmentState, EquipmentToTargetDetectionResult, 
-    AgentObservation, AgentActionCommand
+    AgentObservation, AgentActionCommand, SatelliteInfo, SatelliteCameraInfo
 )
 from .plan_file_process import PlanFileProcess
 from .satellite_fov_calculation import SatelliteFovCalculation
@@ -181,39 +181,67 @@ class TrainingEnv:
                         equip_info.range_min <= r / 1000.0 <= equip_info.range_max):
                         det_res.detectable_flag = True
                 elif equip_info.type == 2:
-                    camera_pointing_max = 0.0
-                    if equip_id in self._dict_satellite_info:
-                        camera_pointing_max = self._dict_satellite_info.get(equip_id).camera_pointing_max
+                    #20260923 TaoXL modify
+                    # camera_pointing_max = 0.0
+                    # if equip_id in self._dict_satellite_info:
+                    #     camera_pointing_max = self._dict_satellite_info.get(equip_id).camera_pointing_max
+                    if equip_id not in self._dict_satellite_info:
+                        continue
 
-                    sat_xyz = pm.geodetic2ecef(equip_info.latitude, equip_info.longitude, equip_info.altitude)
-                    target_xyz = pm.geodetic2ecef(system_track.latitude, system_track.longitude, system_track.altitude)
-                    earth_center = np.array([0.0, 0.0, 0.0])
-                    vec_cam = earth_center - sat_xyz
-                    vec_target = np.array([target_xyz[0], target_xyz[1], target_xyz[2]]) - np.array([sat_xyz[0], sat_xyz[1], sat_xyz[2]])
+                    satellite_info = self._dict_satellite_info.get(equip_id)
 
-                    fov_calc = SatelliteFovCalculation()
-                    earth_occluded_flag = fov_calc.is_earth_occluded(np.array([sat_xyz[0], sat_xyz[1], sat_xyz[2]]),
-                                                                     np.array(
-                                                                         [target_xyz[0], target_xyz[1], target_xyz[2]]))
-                    if earth_occluded_flag:
-                        det_res.detectable_flag = False
-                    else:
-                        norm_cam = np.linalg.norm(vec_cam)
-                        norm_target = np.linalg.norm(vec_target)
+                    sat_last_geo_pos: np.ndarray = None
+                    if agent_observation.current_time > 0 and (agent_observation.current_time - 1) in satellite_info.dict_satellite_traj_pt_info:
+                        sat_last_geo_pos = np.array([satellite_info.dict_satellite_traj_pt_info.get(agent_observation.current_time - 1).longitude,
+                                                     satellite_info.dict_satellite_traj_pt_info.get(agent_observation.current_time - 1).latitude,
+                                                     satellite_info.dict_satellite_traj_pt_info.get(agent_observation.current_time - 1).altitude])
 
-                        if norm_cam == 0 or norm_target == 0:
-                            det_res.detectable_flag = False
-                        else:
-                            dot_product = np.dot(vec_cam, vec_target)
-                            cos_theta = dot_product / (norm_cam * norm_target)
-                            cos_theta = np.clip(cos_theta, -1.0, 1.0)
-                            theta_radians = np.arccos(cos_theta)
-                            theta_degrees = np.degrees(theta_radians)
+                    for camera_info in satellite_info.lst_camera_info:
+                        if camera_info.camera_type == 1 and camera_info.work_mode == 2:
+                            sat_xyz = pm.geodetic2ecef(equip_info.latitude, equip_info.longitude, equip_info.altitude)
+                            target_xyz = pm.geodetic2ecef(system_track.latitude, system_track.longitude, system_track.altitude)
+                            earth_center = np.array([0.0, 0.0, 0.0])
+                            vec_cam = earth_center - sat_xyz
+                            vec_target = np.array([target_xyz[0], target_xyz[1], target_xyz[2]]) - np.array([sat_xyz[0], sat_xyz[1], sat_xyz[2]])
 
-                            if abs(theta_degrees) < equip_info.azi_max + camera_pointing_max:
-                                det_res.detectable_flag = True
-                            else:
+                            fov_calc = SatelliteFovCalculation()
+                            earth_occluded_flag = fov_calc.is_earth_occluded(np.array([sat_xyz[0], sat_xyz[1], sat_xyz[2]]),
+                                                                             np.array(
+                                                                                 [target_xyz[0], target_xyz[1], target_xyz[2]]))
+                            if earth_occluded_flag:
                                 det_res.detectable_flag = False
+                            else:
+                                norm_cam = np.linalg.norm(vec_cam)
+                                norm_target = np.linalg.norm(vec_target)
+
+                                if norm_cam == 0 or norm_target == 0:
+                                    det_res.detectable_flag = False
+                                else:
+                                    dot_product = np.dot(vec_cam, vec_target)
+                                    cos_theta = dot_product / (norm_cam * norm_target)
+                                    cos_theta = np.clip(cos_theta, -1.0, 1.0)
+                                    theta_radians = np.arccos(cos_theta)
+                                    theta_degrees = np.degrees(theta_radians)
+
+                                    if abs(theta_degrees) < equip_info.azi_max + camera_info.camera_pointing_max:
+                                        det_res.detectable_flag = True
+                                    else:
+                                        det_res.detectable_flag = False
+                            break
+                        elif camera_info.camera_type == 3 and camera_info.work_mode == 2:
+                            fov_calc = SatelliteFovCalculation()
+                            sat_current_geo_pos = np.array([equip_info.longitude, equip_info.latitude, equip_info.altitude])
+                            ele_min = -camera_info.camera_pointing_max
+                            ele_max = 60.0
+                            target_geo_pos = np.array([system_track.longitude, system_track.latitude, system_track.altitude])
+                            det_res.detectable_flag = fov_calc.judge_target_can_be_detected_by_low_orbit_satellite_air_camera(sat_current_geo_pos=sat_current_geo_pos,
+                                                                                                                              ele_min=ele_min,
+                                                                                                                              ele_max=ele_max,
+                                                                                                                              target_geo_pos=target_geo_pos,
+                                                                                                                              sat_last_geo_pos=sat_last_geo_pos)
+                            break
+                        else:
+                            continue
                 else:
                     continue
                 

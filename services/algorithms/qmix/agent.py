@@ -36,6 +36,10 @@ class Agents:
         self.ld_n_actions = getattr(ac, 'ld_n_actions', 0) or self.n_targets
         self.ld_capacity = LD_CAPACITY
         self.wx_epsilon = _get(conf, 'wx_epsilon', 0.3)
+        # 锁粘滞（LD 多标签解码）：上一帧已锁、当前仍可用且 Q 非强负的目标继续锁，
+        # 掐断「仍可见但 Q 被反超 → 放掉 → 下帧又捡回」的掉锁-起锁中断抖动。
+        self.lock_sticky = _get(conf, 'lock_sticky', True)
+        self.lock_sticky_margin = float(_get(conf, 'lock_sticky_margin', 0.0))
         self.phase = 1  # phase1 = 只训 LD（WX 待机），phase2 = 联合
 
         # ---- 分组元数据（None = 标准 QMIX, 非空 = HQMIX 双头） ----
@@ -141,9 +145,21 @@ class Agents:
                 n_pick = np.random.randint(0, min(self.ld_capacity, len(cand)) + 1)
                 chosen = np.random.choice(cand, size=n_pick, replace=False)
             else:
-                k = min(self.ld_capacity, self.ld_n_actions)
-                order = np.argsort(-q)[:k]
-                chosen = [b for b in order if q[b] > 0]
+                # 锁粘滞：上一帧已锁的目标，只要当前仍可用且 Q 非强负（≥ -margin），
+                # 就优先保留；剩余容量再用「未锁过的正 Q」按 top-K 填补。
+                prev = None
+                if self.lock_sticky and last_actions is not None:
+                    prev = np.asarray(last_actions[i])[1:]      # 上一帧目标锁位（0..ld_n_actions-1）
+                keep = []
+                if prev is not None:
+                    keep = [int(b) for b in np.nonzero(prev > 0)[0]
+                            if b < self.ld_n_actions and a[b] > 0
+                            and q[b] >= -self.lock_sticky_margin]
+                used = set(keep)
+                free = self.ld_capacity - len(keep)
+                order = [int(b) for b in np.argsort(-q)
+                         if b not in used and a[b] > 0 and q[b] > 0]
+                chosen = keep + order[:max(0, free)]
 
             for b in chosen:
                 b = int(b)

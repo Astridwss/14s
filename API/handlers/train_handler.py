@@ -70,6 +70,16 @@ class TrainHandler:
         runner = EvalRunner(self.conf, self.push)
         try:
             result = runner.run()
+            p1 = result.get("targetCoverCount")
+            p2 = result.get("interruptCount")
+            p3 = result.get("coverageMultiplicity")
+            p4 = result.get("trackingCoverage")
+            p = result.get("totalScore")
+            print(f"[BaselineEvalRunner] 目标覆盖数量评分P11:{p1}")
+            print(f"[BaselineEvalRunner] 航迹连续性评分P12:{p2}")
+            print(f"[BaselineEvalRunner] 航迹可靠性评分P13:{p3}")
+            print(f"[BaselineEvalRunner] 跟踪覆盖率评分P14:{p4}")
+            print(f"[BaselineEvalRunner] 探测效能总分P1:{p}")
             return {
                 "code": 200,
                 "message": "推演任务已成功完成",
@@ -97,6 +107,16 @@ class TrainHandler:
         runner = BaselineEvalRunner(self.conf, self.push)
         try:
             result = runner.run()
+            p1 = result.get("targetCoverCount")
+            p2 = result.get("interruptCount")
+            p3 = result.get("coverageMultiplicity")
+            p4 = result.get("trackingCoverage")
+            p = result.get("totalScore")
+            print(f"[BaselineEvalRunner] 目标覆盖数量评分P21:{p1}")
+            print(f"[BaselineEvalRunner] 航迹连续性评分P22:{p2}")
+            print(f"[BaselineEvalRunner] 航迹可靠性评分P23:{p3}")
+            print(f"[BaselineEvalRunner] 跟踪覆盖率评分P24:{p4}")
+            print(f"[BaselineEvalRunner] 探测效能总分P2:{p}")
             return {
                 "code": 200,
                 "message": "基准推演任务已成功完成",

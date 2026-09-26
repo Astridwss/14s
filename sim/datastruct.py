@@ -44,7 +44,20 @@ class SensorInfo:
     azi_max: float = 360.0          # 探测方位右界，单位：deg
     ele_min: float = 0.0            # 探测仰角下界，单位：deg
     ele_max: float = 90.0           # 探测仰角上界，单位：deg
-    track_num_max: int = 20          # 最大跟踪容量
+    track_num_max: int = 20         # 最大跟踪容量
+
+
+# 卫星相机信息
+@dataclass
+class SatelliteCameraInfo:
+    camera_type: int = 0                    # 相机类型，1-高轨卫星相机，2-低轨卫星对地相机，3-低轨卫星对空相机，0-其他相机
+    work_mode: int = 0                      # 工作模式，1-搜索/监视，2-凝视，0-其他
+    azi_min: float = -180.0                 # 视场起始方位，单位：deg
+    azi_max: float = 180.0                  # 视场结束方位，单位：deg
+    ele_min: float = 0.0                    # 视场起始俯仰，单位：deg
+    ele_max: float = 90.0                   # 视场结束俯仰，单位：deg
+    camera_pointing_max: float = 0.0        # 相机最大指向角，单位：deg
+    detection_range: float = 4000.0         # 探测距离，单位：km
 
 
 # 卫星信息
@@ -58,7 +71,8 @@ class SatelliteInfo:
     ele_min: float = -10.0                                                                      # 探测仰角下界，单位：deg
     ele_max: float = 10.0                                                                       # 探测仰角上界，单位：deg
     track_num_max: int = 1                                                                      # 最大跟踪容量
-    camera_pointing_max: float = 30.0                                                           # 相机最大指向角，单位：deg
+    lst_camera_info: List[SatelliteCameraInfo] = field(default_factory=list)                    # 卫星相机信息列表
+    # camera_pointing_max: float = 30.0                                                           # 相机最大指向角，单位：deg
 
 
 # 作战场景

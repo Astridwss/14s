@@ -7,6 +7,7 @@ import numpy as np
 from .datastruct import (
     PlanFileInfo, BattleScene, EquipmentDetectionTime, PlanResult,
     AgentActionCommand, TargetTrajPtInfo, TargetInfo, SensorInfo, SatelliteInfo,
+    SatelliteCameraInfo
 )
 from .two_dim_coordinate import TwoDimensionMinMax
 from .ganttchart import GanttChart, OverlappingNumberRequirement
@@ -69,8 +70,12 @@ class PlanFileProcess:
 
                                 #print(f"left：{radar_info.azi_min}, right:{radar_info.azi_max}")
 
-                                radar_info.ele_min = float(dict_radar.get('minElePower', 0))
-                                radar_info.ele_max = float(dict_radar.get('maxElePower', 90))
+                                # radar_info.ele_min = float(dict_radar.get('minElePower', 0))
+                                # radar_info.ele_max = float(dict_radar.get('maxElePower', 90))
+
+                                radar_info.ele_min = float(dict_radar.get('radarFYXJ', 0))
+                                radar_info.ele_max = float(dict_radar.get('radarFYSJ', 90))
+
                                 radar_info.track_num_max = 20
                                 battle_scene.dict_radar_id_info[radar_info.str_sensor_id] = radar_info
 
@@ -92,39 +97,88 @@ class PlanFileProcess:
                                 if isinstance(sensor_info_data, dict):
                                     lst_sensor_info = sensor_info_data.get('sensorInfo')
 
-                                    first_count_flag = True
+                                    # first_count_flag = True
                                     for dict_sensor_info in lst_sensor_info:
-                                        lst_work_mode = dict_sensor_info.get('workMode')
-                                        for dict_work_mode in lst_work_mode:
-                                            sensor_azi_min = -dict_work_mode.get('workModeParameters').get(
-                                                'azimuth') / 2.0
-                                            sensor_azi_max = dict_work_mode.get('workModeParameters').get(
-                                                'azimuth') / 2.0
-                                            sensor_ele_min = -dict_work_mode.get('workModeParameters').get(
-                                                'elevation') / 2.0
-                                            sensor_ele_max = dict_work_mode.get('workModeParameters').get(
-                                                'elevation') / 2.0
-                                            sensor_pointing_max = dict_work_mode.get('workModeParameters').get(
-                                                'pointing', 10.0)
+                                        str_sensor_type = dict_sensor_info.get('sensor', 'infrared')
+                                        if str_sensor_type == 'infrared':
+                                            camera_type = 1
+                                        elif str_sensor_type == 'duidi':
+                                            # camera_type = 2   20260924 前台填错了，临时调整后台
+                                            camera_type = 3
+                                        elif str_sensor_type == 'duikong':
+                                            # camera_type = 3   20260924 前台填错了，临时调整后台
+                                            camera_type = 2
+                                        else:
+                                            camera_type = 0
 
-                                            if first_count_flag:
-                                                satellite_info.azi_min = sensor_azi_min
-                                                satellite_info.azi_max = sensor_azi_max
-                                                satellite_info.ele_min = sensor_ele_min
-                                                satellite_info.ele_max = sensor_ele_max
-                                                satellite_info.camera_pointing_max = sensor_pointing_max
-                                                first_count_flag = False
+                                        lst_work_mode = dict_sensor_info.get('workMode', [])
+                                        for dict_work_mode in lst_work_mode:
+                                            str_work_mode_name = dict_work_mode.get('name', '')
+
+                                            satellite_camera_info = SatelliteCameraInfo()
+                                            satellite_camera_info.camera_type = camera_type
+
+                                            if '搜索' in str_work_mode_name:
+                                                satellite_camera_info.work_mode = 1
+                                            elif '凝视' in str_work_mode_name:
+                                                satellite_camera_info.work_mode = 2
                                             else:
-                                                if sensor_azi_min < satellite_info.azi_min:
-                                                    satellite_info.azi_min = sensor_azi_min
-                                                if sensor_azi_max > satellite_info.azi_max:
-                                                    satellite_info.azi_max = sensor_azi_max
-                                                if sensor_ele_min < satellite_info.ele_min:
-                                                    satellite_info.ele_min = sensor_ele_min
-                                                if sensor_ele_max > satellite_info.ele_max:
-                                                    satellite_info.ele_max = sensor_ele_max
-                                                if sensor_pointing_max > satellite_info.camera_pointing_max:
-                                                    satellite_info.camera_pointing_max = sensor_pointing_max
+                                                satellite_camera_info.work_mode = 0
+
+                                            dict_work_mode_parameters = dict_work_mode.get('workModeParameters', {})
+                                            satellite_camera_info.azi_min = dict_work_mode_parameters.get('startazimuth', -2.0)
+                                            satellite_camera_info.azi_max = dict_work_mode_parameters.get('endazimuth', 2.0)
+                                            satellite_camera_info.ele_min = dict_work_mode_parameters.get('startelevation', -2.0)
+                                            satellite_camera_info.ele_max = dict_work_mode_parameters.get('endelevation', 2.0)
+                                            satellite_camera_info.camera_pointing_max = dict_work_mode_parameters.get('pointing', 10.0)
+                                            satellite_camera_info.detection_range = dict_work_mode_parameters.get('distance', 4000.0)
+
+                                            satellite_info.lst_camera_info.append(satellite_camera_info)
+
+                                            # 20260921 TaoXL modify
+                                            # sensor_azi_min = -dict_work_mode.get('workModeParameters').get(
+                                            #     'azimuth') / 2.0
+                                            # sensor_azi_max = dict_work_mode.get('workModeParameters').get(
+                                            #     'azimuth') / 2.0
+                                            # sensor_ele_min = -dict_work_mode.get('workModeParameters').get(
+                                            #     'elevation') / 2.0
+                                            # sensor_ele_max = dict_work_mode.get('workModeParameters').get(
+                                            #     'elevation') / 2.0
+                                            # sensor_pointing_max = dict_work_mode.get('workModeParameters').get(
+                                            #     'pointing', 10.0)
+
+                                            # 20260923 TaoXL modify
+                                            # if '-' in satellite_info.str_satellite_name:
+                                            #     sensor_azi_min = -5.0
+                                            #     sensor_azi_max = 5.0
+                                            #     sensor_ele_min = -5.0
+                                            #     sensor_ele_max = 5.0
+                                            #     sensor_pointing_max = 30.0
+                                            # else:
+                                            #     sensor_azi_min = -2.0
+                                            #     sensor_azi_max = 2.0
+                                            #     sensor_ele_min = -2.0
+                                            #     sensor_ele_max = 2.0
+                                            #     sensor_pointing_max = 10.0
+                                            #
+                                            # if first_count_flag:
+                                            #     satellite_info.azi_min = sensor_azi_min
+                                            #     satellite_info.azi_max = sensor_azi_max
+                                            #     satellite_info.ele_min = sensor_ele_min
+                                            #     satellite_info.ele_max = sensor_ele_max
+                                            #     satellite_info.camera_pointing_max = sensor_pointing_max
+                                            #     first_count_flag = False
+                                            # else:
+                                            #     if sensor_azi_min < satellite_info.azi_min:
+                                            #         satellite_info.azi_min = sensor_azi_min
+                                            #     if sensor_azi_max > satellite_info.azi_max:
+                                            #         satellite_info.azi_max = sensor_azi_max
+                                            #     if sensor_ele_min < satellite_info.ele_min:
+                                            #         satellite_info.ele_min = sensor_ele_min
+                                            #     if sensor_ele_max > satellite_info.ele_max:
+                                            #         satellite_info.ele_max = sensor_ele_max
+                                            #     if sensor_pointing_max > satellite_info.camera_pointing_max:
+                                            #         satellite_info.camera_pointing_max = sensor_pointing_max
 
                                 satellite_info.track_num_max = 1
 
@@ -165,21 +219,22 @@ class PlanFileProcess:
                                 if isinstance(missile_calc_data, dict):
                                     dict_cur_tar_info = missile_calc_data.get('curTarInfo', {})
 
-                                    # 🚨 核心修复 2：进入 vBfList 层级提取轨迹点！
-                                    lst_vbf = dict_cur_tar_info.get('vBfList', [])
-                                    for dict_vbf in lst_vbf:
-                                        lst_vpt = dict_vbf.get('vPtList', [])
-                                        for dict_vpt in lst_vpt:
-                                            traj_pt_info = TargetTrajPtInfo()
-                                            traj_pt_info.time = round(dict_vpt.get('dTime', 0))
-                                            geo_pos = dict_vpt.get('geoPos', {})
-                                            traj_pt_info.longitude = float(geo_pos.get('x', 0.0))
-                                            traj_pt_info.latitude = float(geo_pos.get('y', 0.0))
-                                            traj_pt_info.altitude = float(geo_pos.get('z', 0.0)) * 1000.0
-                                            traj_pt_info.rcs = 1.0
-                                            traj_pt_info.type = 1
+                                    # 🚨 核心修复 2：进入 vPtList 层级提取轨迹点！
+                                    # lst_vbf = dict_cur_tar_info.get('vBfList', [])
+                                    lst_vpt = dict_cur_tar_info.get('vPtList', [])
+                                    # for dict_vbf in lst_vbf:
+                                    #     lst_vpt = dict_vbf.get('vPtList', [])
+                                    for dict_vpt in lst_vpt:
+                                        traj_pt_info = TargetTrajPtInfo()
+                                        traj_pt_info.time = round(dict_vpt.get('dTime', 0))
+                                        geo_pos = dict_vpt.get('geoPos', {})
+                                        traj_pt_info.longitude = float(geo_pos.get('x', 0.0))
+                                        traj_pt_info.latitude = float(geo_pos.get('y', 0.0))
+                                        traj_pt_info.altitude = float(geo_pos.get('z', 0.0)) * 1000.0
+                                        traj_pt_info.rcs = 1.0
+                                        traj_pt_info.type = 1
 
-                                            target_info.dict_target_traj_pt_info[traj_pt_info.time] = traj_pt_info
+                                        target_info.dict_target_traj_pt_info[traj_pt_info.time] = traj_pt_info
 
                                 battle_scene.dict_target_id_info[target_info.str_target_id] = target_info
 
@@ -286,9 +341,10 @@ class PlanFileProcess:
                                                  satellite_info.dict_satellite_traj_pt_info.get(time - 1).latitude,
                                                  satellite_info.dict_satellite_traj_pt_info.get(time - 1).altitude])
 
-                fov_az = satellite_info.azi_max - satellite_info.azi_min
-                fov_el = satellite_info.ele_max - satellite_info.ele_min
-                max_pointing_angle = satellite_info.camera_pointing_max
+                # 20260923 TaoXL modify
+                # fov_az = satellite_info.azi_max - satellite_info.azi_min
+                # fov_el = satellite_info.ele_max - satellite_info.ele_min
+                # max_pointing_angle = satellite_info.camera_pointing_max
 
                 center_target_geo_pos: np.ndarray = None
                 target_info: TargetInfo = battle_scene.dict_target_id_info.get(str_target_id)
@@ -298,13 +354,43 @@ class PlanFileProcess:
                                                       target_info.dict_target_traj_pt_info.get(time).altitude])
 
                 fov_calc = SatelliteFovCalculation()
-                in_fov_indices: List[int] = fov_calc.find_targets_in_fov(sat_current_geo_pos=sat_current_geo_pos,
-                                                                         fov_az=fov_az,
-                                                                         fov_el=fov_el,
-                                                                         center_target_geo_pos=center_target_geo_pos,
-                                                                         max_pointing_angle=max_pointing_angle,
-                                                                         targets=targets,
-                                                                         sat_last_geo_pos=sat_last_geo_pos)
+                in_fov_indices: List[int] = []
+                # 20260923 TaoXL add
+                for camera_info in satellite_info.lst_camera_info:
+                    if ((camera_info.camera_type == 1 and camera_info.work_mode == 1) or
+                            (camera_info.camera_type == 2 and camera_info.work_mode == 1)):
+                        for i, target_geo_pos in enumerate(targets):
+                            in_flag: bool = fov_calc.judge_target_can_be_detected_by_satellite_ground_camera(sat_current_geo_pos=sat_current_geo_pos,
+                                                                                                             azi_min=camera_info.azi_min,
+                                                                                                             azi_max=camera_info.azi_max,
+                                                                                                             ele_min=camera_info.ele_min,
+                                                                                                             ele_max=camera_info.ele_max,
+                                                                                                             target_geo_pos=target_geo_pos,
+                                                                                                             sat_last_geo_pos=sat_last_geo_pos)
+                            if in_flag and (i not in in_fov_indices):
+                                in_fov_indices.append(i)
+
+                    elif camera_info.camera_type == 3 and camera_info.work_mode == 1:
+                        for i, target_geo_pos in enumerate(targets):
+                            in_flag: bool = fov_calc.judge_target_can_be_detected_by_low_orbit_satellite_air_camera(sat_current_geo_pos=sat_current_geo_pos,
+                                                                                                                    ele_min=camera_info.ele_min,
+                                                                                                                    ele_max=camera_info.ele_max,
+                                                                                                                    target_geo_pos=target_geo_pos,
+                                                                                                                    sat_last_geo_pos=sat_last_geo_pos)
+                            if in_flag and (i not in in_fov_indices):
+                                in_fov_indices.append(i)
+
+                    elif camera_info.camera_type == 1 and camera_info.work_mode == 2:
+                        in_flag_indices: List[int] = fov_calc.find_targets_in_fov(sat_current_geo_pos=sat_current_geo_pos,
+                                                                                  fov_az=camera_info.azi_max - camera_info.azi_min,
+                                                                                  fov_el=camera_info.ele_max - camera_info.ele_min,
+                                                                                  center_target_geo_pos=center_target_geo_pos,
+                                                                                  max_pointing_angle=camera_info.camera_pointing_max,
+                                                                                  targets=targets,
+                                                                                  sat_last_geo_pos=sat_last_geo_pos)
+                        for i in in_flag_indices:
+                            if i not in in_fov_indices:
+                                in_fov_indices.append(i)
 
                 for index in in_fov_indices:
                     str_add_target_id = lst_target_id[index]

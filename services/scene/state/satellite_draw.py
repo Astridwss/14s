@@ -67,26 +67,80 @@ def compute_satellite_fov_targets(
             )
 
         try:
-            in_fov = calc.find_targets_in_fov(
-                sat_current_geo_pos=np.array(
-                    [equip.longitude, equip.latitude, equip.altitude],
-                    dtype=np.float64,
-                ),
-                fov_az=sat_info.azi_max - sat_info.azi_min,
-                fov_el=sat_info.ele_max - sat_info.ele_min,
-                center_target_geo_pos=np.array(
-                    [center_trk.longitude, center_trk.latitude, center_trk.altitude],
-                    dtype=np.float64,
-                ),
-                max_pointing_angle=sat_info.camera_pointing_max,
-                targets=targets,
-                sat_last_geo_pos=sat_last,
-            )
+            in_fov_indices = []
+            for camera_info in sat_info.lst_camera_info:
+                if ((camera_info.camera_type == 1 and camera_info.work_mode == 1) or
+                        (camera_info.camera_type == 2 and camera_info.work_mode == 1)):
+                    for i, target_geo_pos in enumerate(targets):
+                        in_flag: bool = calc.judge_target_can_be_detected_by_satellite_ground_camera(
+                            sat_current_geo_pos=np.array(
+                            [equip.longitude, equip.latitude, equip.altitude],
+                            dtype=np.float64,
+                            ),
+                            azi_min=camera_info.azi_min,
+                            azi_max=camera_info.azi_max,
+                            ele_min=camera_info.ele_min,
+                            ele_max=camera_info.ele_max,
+                            target_geo_pos=target_geo_pos,
+                            sat_last_geo_pos=sat_last)
+                        if in_flag and (i not in in_fov_indices):
+                            in_fov_indices.append(i)
+
+                elif camera_info.camera_type == 3 and camera_info.work_mode == 1:
+                    for i, target_geo_pos in enumerate(targets):
+                        in_flag: bool = calc.judge_target_can_be_detected_by_low_orbit_satellite_air_camera(
+                            sat_current_geo_pos=np.array(
+                            [equip.longitude, equip.latitude, equip.altitude],
+                            dtype=np.float64,
+                            ),
+                            ele_min=camera_info.ele_min,
+                            ele_max=camera_info.ele_max,
+                            target_geo_pos=target_geo_pos,
+                            sat_last_geo_pos=sat_last)
+                        if in_flag and (i not in in_fov_indices):
+                            in_fov_indices.append(i)
+
+                elif camera_info.camera_type == 1 and camera_info.work_mode == 2:
+                    in_fov = calc.find_targets_in_fov(
+                        sat_current_geo_pos=np.array(
+                            [equip.longitude, equip.latitude, equip.altitude],
+                            dtype=np.float64,
+                        ),
+                        fov_az=sat_info.azi_max - sat_info.azi_min,
+                        fov_el=sat_info.ele_max - sat_info.ele_min,
+                        center_target_geo_pos=np.array(
+                            [center_trk.longitude, center_trk.latitude, center_trk.altitude],
+                            dtype=np.float64,
+                        ),
+                        max_pointing_angle=sat_info.camera_pointing_max,
+                        targets=targets,
+                        sat_last_geo_pos=sat_last,
+                    )
+                    for i in in_fov:
+                        if i not in in_fov_indices:
+                            in_fov_indices.append(i)
+
+            # in_fov = calc.find_targets_in_fov(
+            #     sat_current_geo_pos=np.array(
+            #         [equip.longitude, equip.latitude, equip.altitude],
+            #         dtype=np.float64,
+            #     ),
+            #     fov_az=sat_info.azi_max - sat_info.azi_min,
+            #     fov_el=sat_info.ele_max - sat_info.ele_min,
+            #     center_target_geo_pos=np.array(
+            #         [center_trk.longitude, center_trk.latitude, center_trk.altitude],
+            #         dtype=np.float64,
+            #     ),
+            #     max_pointing_angle=sat_info.camera_pointing_max,
+            #     targets=targets,
+            #     sat_last_geo_pos=sat_last,
+            # )
         except (ValueError, ZeroDivisionError):
             # 几何退化（位置零向量 / 重合），单颗卫星算失败不影响整体
             continue
 
-        for idx in in_fov:
+        # for idx in in_fov:
+        for idx in in_fov_indices:
             tid = target_ids[idx]
             if tid != locked_tid:
                 fov_pairs.append((sat_id, tid))

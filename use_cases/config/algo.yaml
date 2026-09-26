@@ -22,7 +22,7 @@ qmix:
   # 2. 探索率控制
   epsilon_start: 1.0         
   epsilon_finish: 0.1       
-  epsilon_anneal_time: 500000
+  epsilon_anneal_time: 400000
   optimizer: "RMS"           
   
   # 3. 网络结构参数
@@ -38,6 +38,10 @@ qmix:
 
   # 5. 奖励策略 (coverage = 覆盖式, relay = 接力+效能)
   reward: relay
+  mult_reward_cap: 10          # R_mult 覆盖重数封顶重数：10=现状(10重封顶)，0或负=去封顶(能看尽看，无上限)，容易有loss不稳定的风险，Q值爆炸
+  lock_sticky: true            # LD 解码锁粘滞：上一帧已锁、仍可见就继续锁，掐断掉锁-起锁的中断抖动
+  lock_sticky_margin: 1.0      # 粘滞放锁阈值：仅当 Q < -margin 才放掉上一帧锁（0=Q<0 才放；正数形成 [-margin,0] 迟滞带，掐 Q 过零型 ABA 抖动）
+  wx_see_all: false            # WX 能看尽看：true=卫星空闲时也跟踪舒适/冗余目标(去耗能约束)，false=现状只补盲/预警
 
 # ==========================================
 # 算法 2: 模仿学习参数
@@ -65,9 +69,9 @@ drqn:
 # 训练全局控制 (Train 模式公共配置)
 train:
   max_episodes: 5000             # RL 默认训练回合数
-  rl_num_workers: 1             # RL 并行环境采样 worker 数（>1 启用多进程 rollout；按机器 CPU 核数调，可被环境变量 NUM_ENV_WORKERS 覆盖） 16
-  utd_ratio: 1                   # UTD 比：每新采 1 局做几次梯度更新（replay 复用，喂饱 GPU；1=原行为，4~8 常用） 4
-  il_num_workers: 1              # IL 数据加载并行进程数（DataLoader num_workers；独立于 RL 的 env 采样 num_workers；Windows 开发机报错可设 0） 8
+  rl_num_workers: 8             # RL 并行环境采样 worker 数（>1 启用多进程 rollout；按机器 CPU 核数调，可被环境变量 NUM_ENV_WORKERS 覆盖） 16
+  utd_ratio: 2                   # UTD 比：每新采 1 局做几次梯度更新（replay 复用，喂饱 GPU；1=原行为，4~8 常用） 4
+  il_num_workers: 8              # IL 数据加载并行进程数（DataLoader num_workers；独立于 RL 的 env 采样 num_workers；Windows 开发机报错可设 0） 8
   expert_csv_workers: 8           # IL 专家数据生成多进程数（按时间步切分并行；1=串行原行为，0=自动 min(cpu,8)）
   load_dir: "./load_dir"
   epochs: 50                     # IL 默认训练轮数
